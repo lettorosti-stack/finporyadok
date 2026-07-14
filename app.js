@@ -77,6 +77,43 @@ function categoryRoot(row) {
   return String(row.category || "Без категории").split(":")[0];
 }
 
+const bankBrands = [
+  { id: "sber", name: "Сбербанк", short: "Сб", tone: "#19a64a", text: "#ffffff", aliases: ["сбер", "sber"] },
+  { id: "vtb", name: "ВТБ", short: "ВТБ", tone: "#155bd8", text: "#ffffff", aliases: ["втб", "vtb"] },
+  { id: "sovcom", name: "Совкомбанк", short: "Сов", tone: "#1f5cb8", text: "#ffffff", aliases: ["совком", "halva", "халва"] },
+  { id: "tbank", name: "Т-Банк", short: "Т", tone: "#ffd429", text: "#111827", aliases: ["т-банк", "т банк", "тбанк", "t-bank", "tbank", "тинькофф", "tinkoff", "т-барк"] },
+  { id: "alfa", name: "Альфа-Банк", short: "А", tone: "#ef3124", text: "#ffffff", aliases: ["альфа", "alfa", "alpha"] },
+  { id: "raiffeisen", name: "Райффайзен", short: "R", tone: "#ffe600", text: "#111827", aliases: ["райфф", "raiff", "raiffeisen"] },
+  { id: "domrf", name: "Дом РФ", short: "ДР", tone: "#0f7a6f", text: "#ffffff", aliases: ["дом рф", "дом.рф", "domrf", "домрф"] },
+  { id: "domclick", name: "Домклик", short: "ДК", tone: "#14b86f", text: "#ffffff", aliases: ["домклик", "domclick"] },
+  { id: "yapay", name: "Яндекс Пэй", short: "Я", tone: "#fc3f1d", text: "#ffffff", aliases: ["яндекс пэй", "яндекс pay", "yandex pay", "yapay", "яндекс банк"] },
+  { id: "wildberries", name: "Вайлдберриз банк", short: "WB", tone: "#a600ff", text: "#ffffff", aliases: ["вайлдбер", "wildberries", "wb банк", "wb"] },
+  { id: "ozon", name: "Озон банк", short: "OZ", tone: "#005bff", text: "#ffffff", aliases: ["озон", "ozon"] }
+];
+
+function normalizeBrandText(value) {
+  return String(value || "").toLowerCase().replace(/ё/g, "е").replace(/[._-]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function brandForAccount(accountName) {
+  const normalized = normalizeBrandText(accountName);
+  return bankBrands.find((brand) => brand.aliases.some((alias) => normalized.includes(normalizeBrandText(alias)))) || null;
+}
+
+function bankIcon(accountName) {
+  const brand = brandForAccount(accountName);
+  if (!brand) {
+    return `<span class="bank-icon bank-icon--default" aria-hidden="true">₽</span>`;
+  }
+  return `<span class="bank-icon" style="--bank-bg:${brand.tone};--bank-fg:${brand.text}" title="${escapeHtml(brand.name)}" aria-label="${escapeHtml(brand.name)}">${escapeHtml(brand.short)}</span>`;
+}
+
+function accountPill(accountName) {
+  const name = accountName || "-";
+  const brand = brandForAccount(name);
+  return `<span class="account-pill">${bankIcon(name)}<span>${escapeHtml(name)}</span>${brand ? `<small>${escapeHtml(brand.name)}</small>` : ""}</span>`;
+}
+
 function topBy(rows, key, filter = () => true) {
   const map = new Map();
   rows.filter(filter).forEach((row) => {
@@ -95,6 +132,10 @@ function topBy(rows, key, filter = () => true) {
 
 function accountSummaries() {
   const map = new Map(topBy(state.rows, (row) => row.account).map((item) => [item.name, item]));
+  topBy(state.rows, (row) => row.from || row.to).forEach((item) => {
+    if (!item.name || item.name === "Без значения" || map.has(item.name)) return;
+    map.set(item.name, item);
+  });
   state.accounts.forEach((account) => {
     const name = account.name?.trim();
     if (!name) return;
@@ -159,7 +200,7 @@ function renderDashboard() {
   byId("latestRows").innerHTML = latest.map(rowTemplate).join("");
 
   const accounts = accountSummaries().slice(0, 6);
-  byId("accountSummary").innerHTML = accounts.map((item) => summaryRow(item.name, `${item.count} операций`, money(item.balance))).join("");
+  byId("accountSummary").innerHTML = accounts.map((item) => accountSummaryRow(item.name, `${item.count} операций`, money(item.balance))).join("");
 
   const cats = topBy(state.rows, categoryRoot, (row) => row.amount < 0).slice(0, 6);
   byId("categorySummary").innerHTML = cats.map((item) => progressRow(item.name, item.count, item.total, cats[0]?.total || 1)).join("");
@@ -172,7 +213,7 @@ function rowTemplate(row) {
     <td>${escapeHtml(row.date)}</td>
     <td>${escapeHtml(row.description || "Операция")}</td>
     <td><span class="tag">${escapeHtml(row.category || "Без категории")}</span></td>
-    <td>${escapeHtml(row.account || "-")}</td>
+    <td>${accountPill(row.account)}</td>
     <td>${escapeHtml(row.project || "-")}</td>
     <td class="amount ${cls}">${kind === "transfer" ? "0 ₽" : money(row.amount)}</td>
   </tr>`;
@@ -182,12 +223,17 @@ function summaryRow(title, sub, value) {
   return `<article class="row"><div><strong>${title}</strong><small>${sub}</small></div><b>${value}</b></article>`;
 }
 
+function accountSummaryRow(title, sub, value) {
+  return `<article class="row account-row"><div><strong>${accountPill(title)}</strong><small>${sub}</small></div><b>${value}</b></article>`;
+}
+
 function progressRow(title, count, total, max) {
   const pct = Math.max(3, Math.round((total / max) * 100));
   return `<article class="row"><div><strong>${title}</strong><small>${count} операций • ${money(total)}</small><div class="bar"><i style="width:${pct}%"></i></div></div></article>`;
 }
 
 function renderFilters() {
+  ensureAccountPicker();
   fillSelect("accountFilter", accountSummaries().map((x) => x.name));
   fillSelect("categoryFilter", topBy(state.rows, categoryRoot).map((x) => x.name));
   populateAccountSelect();
@@ -220,7 +266,7 @@ function renderTransactions() {
   const rows = filteredRows().sort((a, b) => b.date.localeCompare(a.date));
   byId("transactionRows").innerHTML = rows.slice(0, 500).map((row) => {
     const cls = row.amount >= 0 ? "good" : "bad";
-    return `<tr class="clickable-row" data-row-id="${escapeHtml(row.id)}" tabindex="0"><td>${escapeHtml(row.date)}</td><td>${escapeHtml(row.description)}</td><td><span class="tag">${escapeHtml(row.category)}</span></td><td>${escapeHtml(row.account)}</td><td>${escapeHtml(row.payee || "-")}</td><td>${escapeHtml(row.project || "-")}</td><td class="amount ${cls}">${money(row.amount)}</td></tr>`;
+    return `<tr class="clickable-row" data-row-id="${escapeHtml(row.id)}" tabindex="0"><td>${escapeHtml(row.date)}</td><td>${escapeHtml(row.description)}</td><td><span class="tag">${escapeHtml(row.category)}</span></td><td>${accountPill(row.account)}</td><td>${escapeHtml(row.payee || "-")}</td><td>${escapeHtml(row.project || "-")}</td><td class="amount ${cls}">${money(row.amount)}</td></tr>`;
   }).join("");
   if (document.querySelector("#transactions.view.active")) {
     byId("pageSubtitle").textContent = `Найдено ${rows.length.toLocaleString("ru-RU")} операций. Нажмите на строку, чтобы открыть детали.`;
@@ -229,7 +275,7 @@ function renderTransactions() {
 
 function renderAccounts() {
   const accounts = accountSummaries();
-  byId("accountCards").innerHTML = accounts.map((item) => `<article class="card"><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.type || "Счет")} • ${item.count} операций • ${escapeHtml(item.latest)}</p><strong>${money(item.balance)}</strong></article>`).join("");
+  byId("accountCards").innerHTML = accounts.map((item) => `<article class="card account-card"><div class="account-card-title">${bankIcon(item.name)}<h3>${escapeHtml(item.name)}</h3></div><p>${escapeHtml(item.type || brandForAccount(item.name)?.name || "Счет")} • ${item.count} операций • ${escapeHtml(item.latest)}</p><strong>${money(item.balance)}</strong></article>`).join("");
 }
 
 function renderBudgets() {
@@ -262,14 +308,46 @@ function renderReports() {
 }
 
 function populateAccountSelect() {
+  ensureAccountPicker();
   const select = byId("txAccountSelect");
   if (!select) return;
   const current = select.value;
-  const accounts = accountSummaries().map((item) => item.name);
+  const accounts = accountSummaries().map((item) => item.name).filter(Boolean);
   select.innerHTML = accounts.length
     ? accounts.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("")
     : `<option value="Наличные">Наличные</option>`;
   if (accounts.includes(current)) select.value = current;
+  updateAccountPreview();
+}
+
+function ensureAccountPicker() {
+  const form = byId("txForm");
+  if (!form) return;
+  let select = byId("txAccountSelect");
+  if (!select) {
+    const current = form.elements.account;
+    if (!current) return;
+    select = document.createElement("select");
+    select.name = "account";
+    select.id = "txAccountSelect";
+    select.required = true;
+    select.value = current.value || "";
+    current.replaceWith(select);
+  }
+  if (!byId("txAccountPreview")) {
+    const preview = document.createElement("div");
+    preview.id = "txAccountPreview";
+    preview.className = "account-preview";
+    select.closest("label")?.after(preview);
+  }
+  select.onchange = updateAccountPreview;
+}
+
+function updateAccountPreview() {
+  const select = byId("txAccountSelect");
+  const preview = byId("txAccountPreview");
+  if (!select || !preview) return;
+  preview.innerHTML = accountPill(select.value || "Наличные");
 }
 
 function showOperationDetails(id) {
