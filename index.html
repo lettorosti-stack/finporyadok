@@ -30,12 +30,6 @@
         </nav>
 
         <section class="side-card">
-          <span>Источник данных</span>
-          <strong id="sourceName">AndroMoney1.csv</strong>
-          <small id="sourceMeta">Загрузка...</small>
-        </section>
-
-        <section class="side-card">
           <span>Очередь проверки</span>
           <strong id="reviewCount">0</strong>
           <small>новые, спорные и импортированные операции</small>
@@ -50,6 +44,7 @@
           </div>
           <div class="top-actions">
             <input id="searchInput" type="search" placeholder="Поиск по операциям, категориям, счетам" />
+            <button id="exportBtn">Экспорт</button>
             <button id="addTxBtn">+ Операция</button>
           </div>
         </header>
@@ -91,11 +86,12 @@
         </section>
 
         <section class="view" id="accounts">
+          <div class="panel-head page-actions"><h2>Счета</h2><button id="addAccountBtn">+ Счет</button></div>
           <div class="cards-grid" id="accountCards"></div>
         </section>
 
         <section class="view" id="budgets">
-          <div class="panel-head page-actions"><h2>Бюджеты по крупнейшим категориям</h2><button id="autoBudgetBtn">Сформировать лимиты</button></div>
+          <div class="panel-head page-actions"><h2>Бюджеты по крупнейшим категориям</h2><div class="button-row"><button id="addCategoryBtn">+ Категория</button><button id="autoBudgetBtn">Сформировать лимиты</button></div></div>
           <div class="cards-grid" id="budgetCards"></div>
         </section>
 
@@ -120,6 +116,10 @@
               <div class="panel-head"><h2>Прогноз повторных покупок</h2></div>
               <div id="purchasePredictions" class="stack"></div>
             </section>
+            <section class="panel">
+              <div class="panel-head"><h2>Где выгоднее за прошлый месяц</h2></div>
+              <div id="shoppingAnalysis" class="stack"></div>
+            </section>
           </div>
         </section>
 
@@ -139,10 +139,16 @@
         <section class="view" id="import">
           <section class="panel">
             <div class="panel-head"><h2>Импорт AndroMoney / банковской выписки</h2><button id="parsePasteBtn">Проверить текст</button></div>
-            <p class="hint">Поддерживается CSV с разделителем `;`: Описание, Дата, Сумма, Баланс, Категория, Счет, Проект.</p>
-            <input id="fileInput" type="file" accept=".csv,text/csv" />
+            <p class="hint">Поддерживается CSV с разделителем `;`, PDF-выписки с текстовым слоем и QR со скриншота/фото. Дубликаты PDF/QR-операций архивируются и не добавляются повторно.</p>
+            <label>CSV<input id="fileInput" type="file" accept=".csv,text/csv" /></label>
+            <label>PDF выписка<input id="pdfInput" type="file" accept=".pdf,application/pdf" /></label>
+            <label>QR из выписки<input id="qrInput" type="file" accept="image/*" /></label>
             <textarea id="pasteImport" placeholder="Можно вставить CSV сюда"></textarea>
             <div id="importResult" class="import-result">Импортированный файл уже загружен в приложение: AndroMoney1.csv.</div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><h2>Архив дубликатов импорта</h2></div>
+            <div id="duplicateArchive" class="stack"></div>
           </section>
         </section>
 
@@ -153,6 +159,11 @@
             <article class="card"><h3>Безопасность</h3><p>Следующий этап: шифрование локальной базы и отдельные роли семейного доступа.</p></article>
           </div>
         </section>
+        <footer class="app-footer">
+          <span>Источник данных</span>
+          <strong id="sourceName">AndroMoney1.csv</strong>
+          <small id="sourceMeta">Загрузка...</small>
+        </footer>
       </main>
     </div>
 
@@ -162,9 +173,52 @@
         <label>Дата<input name="date" type="date" required /></label>
         <label>Описание<input name="description" required /></label>
         <label>Сумма<input name="amount" type="number" step="0.01" required /></label>
-        <label>Категория<input name="category" required /></label>
-        <label>Счет<input name="account" required /></label>
+        <label>Категория<select name="category" id="txCategorySelect" required></select></label>
+        <label>Проект<select name="project" id="txProjectSelect"></select></label>
+        <label>Счет<select name="account" id="txAccountSelect" required></select></label>
         <menu><button type="button" data-close>Отмена</button><button>Сохранить</button></menu>
+      </form>
+    </dialog>
+
+    <dialog id="categoryDialog">
+      <form method="dialog" id="categoryForm">
+        <header><h2>Новая категория</h2><button type="button" data-close>×</button></header>
+        <label>Название<input name="name" required /></label>
+        <label>Проект<input name="project" list="projectOptions" placeholder="Например, Дом Мечта" /></label>
+        <label>Иконка<select name="icon" id="categoryIconSelect"></select></label>
+        <menu><button type="button" data-close>Отмена</button><button>Создать</button></menu>
+      </form>
+    </dialog>
+
+    <dialog id="shoppingDialog">
+      <form method="dialog" id="shoppingForm">
+        <header><h2>Покупка</h2><button type="button" data-close>×</button></header>
+        <label>Товар<input name="name" required /></label>
+        <label>Количество<input name="qty" placeholder="1 шт." /></label>
+        <label>Магазин<select name="store" id="shoppingStoreSelect"></select></label>
+        <label>Цена<input name="price" type="number" step="0.01" required /></label>
+        <label>Дата<input name="date" type="date" required /></label>
+        <menu><button type="button" data-close>Отмена</button><button>Добавить</button></menu>
+      </form>
+    </dialog>
+
+    <datalist id="projectOptions"></datalist>
+
+    <dialog id="accountDialog">
+      <form method="dialog" id="accountForm">
+        <header><h2>Новый счет</h2><button type="button" data-close>×</button></header>
+        <label>Название<input name="name" required /></label>
+        <label>Тип<select name="type"><option>Карта</option><option>Наличные</option><option>Вклад</option><option>Кредит</option><option>Кошелек</option><option>Другое</option></select></label>
+        <label>Начальный баланс<input name="balance" type="number" step="0.01" value="0" required /></label>
+        <menu><button type="button" data-close>Отмена</button><button>Создать</button></menu>
+      </form>
+    </dialog>
+
+    <dialog id="detailDialog">
+      <form method="dialog">
+        <header><h2>Детали операции</h2><button type="button" data-close>×</button></header>
+        <div id="operationDetails" class="details"></div>
+        <menu><button type="button" data-close>Закрыть</button></menu>
       </form>
     </dialog>
 
