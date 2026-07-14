@@ -103,23 +103,91 @@ const categoryIcons = {
 };
 
 const categoryRules = [
-  ["home", ["дом мечта", "дом", "ремонт", "ипотека", "квартира", "аренда"]],
-  ["build", ["строй", "строит", "материал", "краска", "плитка", "инструмент", "леруа", "петрович", "доска"]],
-  ["utility", ["коммун", "жкх", "электр", "газ", "вода", "интернет", "связь", "телефон"]],
+  ["salary", ["зарплат", "аванс", "оклад"]],
+  ["income", ["доход", "премия", "зачисление", "пополнение"]],
+  ["gift", ["подар"]],
+  ["investment", ["инвест", "дивиденд", "процент"]],
+  ["home", ["дом мечта", "дом", "ремонт", "квартира"]],
+  ["rent", ["ипотека", "аренда", "жилье"]],
+  ["home", ["строй", "строит", "материал", "краска", "плитка", "инструмент", "леруа", "лемана", "петрович", "доска"]],
+  ["utilities", ["коммун", "жкх", "электр", "газ", "вода"]],
+  ["internet", ["интернет", "wi-fi", "wifi"]],
+  ["phone", ["связь", "телефон", "мобильн"]],
   ["car", ["авто", "машин", "парков", "штраф", "мойка"]],
   ["fuel", ["бенз", "топлив", "азс", "лукойл", "газпромнефть"]],
-  ["service", ["сервис", "то", "ремонт авто", "шины", "резина", "запчаст", "страхов"]],
-  ["credit", ["кредит", "заем", "долг", "ипотека", "платеж"]],
-  ["food", ["продукт", "еда", "пятерочка", "перекресток", "магнит", "вкусвилл", "лента"]],
+  ["car", ["сервис", "то", "ремонт авто", "шины", "резина", "запчаст"]],
+  ["insurance", ["страхов"]],
+  ["debt", ["кредит", "заем", "долг", "платеж"]],
+  ["groceries", ["продукт", "еда", "пятерочка", "перекресток", "магнит", "вкусвилл", "лента"]],
+  ["cafe", ["кафе", "ресторан", "кофе", "додо", "pizza"]],
   ["transport", ["транспорт", "такси", "метро", "автобус", "яндекс go", "яндекс такси"]],
+  ["taxi", ["такси", "яндекс go", "яндекс такси"]],
   ["health", ["здоров", "аптек", "врач", "медиц", "клиник"]],
-  ["education", ["детский сад", "школ", "обуч", "курсы", "сад"]],
-  ["family", ["семья", "алим", "дети", "мама", "подар"]],
-  ["shopping", ["одеж", "wildberries", "вайлд", "ozon", "озон", "покуп"]],
-  ["income", ["зарплат", "доход", "премия", "аренда квартиры"]],
+  ["pharmacy", ["аптек"]],
+  ["education", ["школ", "обуч", "курсы"]],
+  ["children", ["детский сад", "сад", "дети"]],
+  ["children", ["семья", "алим", "мама"]],
+  ["clothes", ["одеж"]],
+  ["groceries", ["wildberries", "вайлд", "ozon", "озон", "покуп"]],
   ["travel", ["отпуск", "отдых", "отель", "авиа", "жд", "тур"]],
-  ["entertainment", ["развлеч", "кино", "кафе", "ресторан", "кофе"]]
+  ["entertainment", ["развлеч", "кино"]],
+  ["subscriptions", ["подписк"]],
+  ["taxes", ["налог"]],
+  ["savings", ["накоп"]],
+  ["transfer", ["перевод"]],
+  ["cash", ["налич"]],
+  ["card", ["карта"]],
+  ["wallet", ["кошелек", "кошелёк"]]
 ];
+
+const financeIconCatalog = {
+  income: ["Доходы", "#16A34A"], salary: ["Зарплата", "#16A34A"], freelance: ["Подработка", "#22C55E"], investment: ["Инвестиционный доход", "#059669"], gift: ["Подарки", "#10B981"], "other-income": ["Прочие доходы", "#65A30D"],
+  groceries: ["Продукты", "#F97316"], cafe: ["Кафе и рестораны", "#EA580C"], home: ["Дом", "#8B5CF6"], rent: ["Аренда и ипотека", "#7C3AED"], utilities: ["Коммунальные услуги", "#A855F7"], internet: ["Интернет", "#6366F1"], phone: ["Мобильная связь", "#4F46E5"],
+  transport: ["Общественный транспорт", "#0EA5E9"], car: ["Автомобиль", "#0284C7"], fuel: ["Топливо", "#0369A1"], taxi: ["Такси", "#F59E0B"],
+  health: ["Здоровье", "#EF4444"], pharmacy: ["Аптека", "#DC2626"], sport: ["Спорт", "#14B8A6"], education: ["Образование", "#2563EB"], children: ["Дети", "#EC4899"], clothes: ["Одежда", "#D946EF"], beauty: ["Красота", "#DB2777"], entertainment: ["Развлечения", "#F43F5E"], travel: ["Путешествия", "#06B6D4"], pets: ["Питомцы", "#A16207"], subscriptions: ["Подписки", "#9333EA"],
+  insurance: ["Страхование", "#0F766E"], taxes: ["Налоги", "#475569"], debt: ["Кредиты и долги", "#B91C1C"], savings: ["Накопления", "#059669"], emergency: ["Резервный фонд", "#D97706"], goal: ["Финансовая цель", "#7C3AED"], transfer: ["Переводы", "#64748B"], cash: ["Наличные", "#15803D"], card: ["Банковская карта", "#1D4ED8"], wallet: ["Кошелёк", "#0F766E"], custom: ["Своя категория", "#64748B"]
+};
+const financeIconSymbols = {
+  "income": "<g class=\"fi\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 17V7m-3 3 3-3 3 3m-6 4h6\"/></g>",
+  "salary": "<g class=\"fi\"><rect x=\"3\" y=\"6\" width=\"18\" height=\"13\" rx=\"2\"/><path d=\"M8 6V4h8v2m-4 4v5m-2-3h4m-8 4h12\"/></g>",
+  "freelance": "<g class=\"fi\"><path d=\"m4 17 4.5-9 3 6 2.5-5 6 8\"/><path d=\"M3 20h18M6 13h12\"/></g>",
+  "investment": "<g class=\"fi\"><path d=\"M4 19V9m5 10V5m5 14v-7m5 7V3\"/><path d=\"m3 14 6-6 5 3 6-7\"/></g>",
+  "gift": "<g class=\"fi\"><rect x=\"3\" y=\"8\" width=\"18\" height=\"13\" rx=\"2\"/><path d=\"M12 8v13M2 12h20M12 8C9 8 7 7 7 5.5S8 3 9.5 3C11.5 3 12 8 12 8Zm0 0c3 0 5-1 5-2.5S16 3 14.5 3C12.5 3 12 8 12 8Z\"/></g>",
+  "other-income": "<g class=\"fi\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><circle cx=\"8\" cy=\"12\" r=\".7\" fill=\"currentColor\"/><circle cx=\"12\" cy=\"12\" r=\".7\" fill=\"currentColor\"/><circle cx=\"16\" cy=\"12\" r=\".7\" fill=\"currentColor\"/></g>",
+  "groceries": "<g class=\"fi\"><path d=\"M5 8h14l-1 13H6L5 8Z\"/><path d=\"M9 8a3 3 0 0 1 6 0M3 8h18M9 13h6m-6 4h4\"/></g>",
+  "cafe": "<g class=\"fi\"><path d=\"M4 7h13v7a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V7Z\"/><path d=\"M17 9h2a2 2 0 0 1 0 4h-2M7 3v2m4-2v2m4-2v2M3 21h16\"/></g>",
+  "home": "<g class=\"fi\"><path d=\"m3 11 9-8 9 8v10H3V11Z\"/><path d=\"M9 21v-7h6v7M7 10h2m6 0h2\"/></g>",
+  "rent": "<g class=\"fi\"><path d=\"M4 21V7l8-4 8 4v14M8 21v-5h8v5M8 9h2m4 0h2m-8 4h2m4 0h2\"/><path d=\"M2 21h20\"/></g>",
+  "utilities": "<g class=\"fi\"><path d=\"M13 2 5 14h7l-1 8 8-12h-7l1-8Z\"/><circle cx=\"12\" cy=\"12\" r=\"9\"/></g>",
+  "internet": "<g class=\"fi\"><path d=\"M4 9a12 12 0 0 1 16 0M7 13a8 8 0 0 1 10 0m-7 4a3 3 0 0 1 4 0\"/><circle cx=\"12\" cy=\"20\" r=\"1\" fill=\"currentColor\"/></g>",
+  "phone": "<g class=\"fi\"><rect x=\"6\" y=\"2\" width=\"12\" height=\"20\" rx=\"3\"/><path d=\"M9 5h6m-6 13h6\"/><circle cx=\"12\" cy=\"20\" r=\".5\" fill=\"currentColor\"/></g>",
+  "transport": "<g class=\"fi\"><rect x=\"4\" y=\"3\" width=\"16\" height=\"17\" rx=\"4\"/><path d=\"M7 7h10v6H7V7Zm-3 7h16M8 20v2m8-2v2\"/><circle cx=\"8\" cy=\"16\" r=\"1\" fill=\"currentColor\"/><circle cx=\"16\" cy=\"16\" r=\"1\" fill=\"currentColor\"/></g>",
+  "car": "<g class=\"fi\"><path d=\"m5 10 2-5h10l2 5 2 2v6H3v-6l2-2Z\"/><path d=\"M5 10h14M7 18v2m10-2v2\"/><circle cx=\"7\" cy=\"14\" r=\"1\"/><circle cx=\"17\" cy=\"14\" r=\"1\"/></g>",
+  "fuel": "<g class=\"fi\"><rect x=\"4\" y=\"3\" width=\"11\" height=\"18\" rx=\"2\"/><path d=\"M7 6h5v5H7V6Zm8 1h3l2 3v8a2 2 0 0 1-4 0v-4m-12 1h11\"/></g>",
+  "taxi": "<g class=\"fi\"><path d=\"m4 11 2-5h12l2 5 1 2v5H3v-5l1-2Z\"/><path d=\"M9 6V3h6v3m-11 5h16M7 18v2m10-2v2\"/><circle cx=\"7\" cy=\"14.5\" r=\"1\"/><circle cx=\"17\" cy=\"14.5\" r=\"1\"/></g>",
+  "health": "<g class=\"fi\"><path d=\"M12 21S3 16 3 9a5 5 0 0 1 9-3 5 5 0 0 1 9 3c0 7-9 12-9 12Z\"/><path d=\"M7 12h3l1-3 2 6 1-3h3\"/></g>",
+  "pharmacy": "<g class=\"fi\"><path d=\"M8 3h8v5l3 4v8a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-8l3-4V3Z\"/><path d=\"M8 7h8m-4 5v6m-3-3h6\"/></g>",
+  "sport": "<g class=\"fi\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"m12 3 3 4-1 4H9L8 7l4-4Zm-3 8-4 3m10-3 4 3M8 19l1-4 3-2 3 2 1 4\"/></g>",
+  "education": "<g class=\"fi\"><path d=\"m2 9 10-5 10 5-10 5L2 9Z\"/><path d=\"M6 11v5c3 3 9 3 12 0v-5m4-2v7\"/></g>",
+  "children": "<g class=\"fi\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M8 10h.01M16 10h.01M8 15c2 2 6 2 8 0M9 4c0 2 2 3 4 2\"/></g>",
+  "clothes": "<g class=\"fi\"><path d=\"m8 4-5 4 3 4 2-2v11h8V10l2 2 3-4-5-4c-1 2-7 2-8 0Z\"/><path d=\"M9 4c0 2 6 2 6 0\"/></g>",
+  "beauty": "<g class=\"fi\"><path d=\"M8 10h8v11H8V10Zm2-7h4v7h-4V3Z\"/><path d=\"m10 3 4-1m-4 13h4\"/></g>",
+  "entertainment": "<g class=\"fi\"><path d=\"M5 8h14l2 11a2 2 0 0 1-3 2l-4-4h-4l-4 4a2 2 0 0 1-3-2L5 8Z\"/><path d=\"M8 11v4m-2-2h4m6-2h.01M18 14h.01M9 8l1-4h4l1 4\"/></g>",
+  "travel": "<g class=\"fi\"><path d=\"M10 3h4l1 5h4a2 2 0 0 1 2 2v10H3V10a2 2 0 0 1 2-2h4l1-5Z\"/><path d=\"M8 8v12m8-12v12M3 13h18\"/></g>",
+  "pets": "<g class=\"fi\"><circle cx=\"7\" cy=\"8\" r=\"2\"/><circle cx=\"17\" cy=\"8\" r=\"2\"/><circle cx=\"5\" cy=\"13\" r=\"2\"/><circle cx=\"19\" cy=\"13\" r=\"2\"/><path d=\"M12 11c-3 0-6 4-5 7 1 3 4 1 5 1s4 2 5-1c1-3-2-7-5-7Z\"/></g>",
+  "subscriptions": "<g class=\"fi\"><rect x=\"3\" y=\"5\" width=\"18\" height=\"14\" rx=\"3\"/><path d=\"m10 9 5 3-5 3V9Z\"/></g>",
+  "insurance": "<g class=\"fi\"><path d=\"M12 2 4 5v6c0 5 3 9 8 11 5-2 8-6 8-11V5l-8-3Z\"/><path d=\"m8 12 3 3 5-6\"/></g>",
+  "taxes": "<g class=\"fi\"><path d=\"M6 2h10l3 3v17H6V2Z\"/><path d=\"M15 2v4h4M9 10h6m-6 4h6m-6 4h4\"/></g>",
+  "debt": "<g class=\"fi\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M9 9c0-2 6-2 6 0 0 3-6 2-6 5 0 2 6 2 6 0M12 6v12\"/></g>",
+  "savings": "<g class=\"fi\"><path d=\"M4 10c0-4 4-7 9-7s8 3 8 7v6c0 3-3 5-6 5H8c-3 0-5-2-5-5v-4l1-2Z\"/><path d=\"M14 7c-1-1-3-1-4 0m11 4h-3m-12 8v3m10-3v3\"/><circle cx=\"16.5\" cy=\"10\" r=\".7\" fill=\"currentColor\"/></g>",
+  "emergency": "<g class=\"fi\"><path d=\"M12 3 2 21h20L12 3Z\"/><path d=\"M12 9v6m0 3h.01\"/></g>",
+  "goal": "<g class=\"fi\"><circle cx=\"11\" cy=\"13\" r=\"8\"/><circle cx=\"11\" cy=\"13\" r=\"4\"/><circle cx=\"11\" cy=\"13\" r=\"1\"/><path d=\"m13 11 7-7m-4 0h4v4\"/></g>",
+  "transfer": "<g class=\"fi\"><path d=\"M4 8h14m-4-4 4 4-4 4M20 16H6m4-4-4 4 4 4\"/></g>",
+  "cash": "<g class=\"fi\"><rect x=\"2\" y=\"5\" width=\"20\" height=\"14\" rx=\"2\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M6 8H5v1m13-1h1v1M6 16H5v-1m13 1h1v-1\"/></g>",
+  "card": "<g class=\"fi\"><rect x=\"2\" y=\"4\" width=\"20\" height=\"16\" rx=\"3\"/><path d=\"M2 9h20M6 15h5m-5 2h3\"/></g>",
+  "wallet": "<g class=\"fi\"><path d=\"M3 6a3 3 0 0 1 3-3h12v4h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6Z\"/><path d=\"M3 7h15m0 4h4v5h-4a2.5 2.5 0 0 1 0-5Z\"/></g>",
+  "custom": "<g class=\"fi\"><circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 8v8M8 12h8\"/></g>"
+};
 
 const storeBrands = [
   { id: "pyaterochka", name: "Пятерочка", short: "5", tone: "#e31e24", text: "#ffffff", aliases: ["пятер", "5ka", "five"] },
@@ -196,6 +264,10 @@ function defaultProjectForCategory(categoryName) {
 
 function categoryIcon(categoryName) {
   const meta = categoryMeta(categoryRoot({ category: categoryName }));
+  const catalog = financeIconCatalog[meta.icon];
+  if (catalog) {
+    return `<span class="category-icon" style="--cat-bg:${catalog[1]}" title="${escapeHtml(catalog[0])}" aria-label="${escapeHtml(catalog[0])}"><svg viewBox="0 0 24 24" aria-hidden="true">${financeIconSymbols[meta.icon] || ""}</svg></span>`;
+  }
   const icon = categoryIcons[meta.icon] || categoryIcons.default;
   return `<span class="category-icon" style="--cat-bg:${icon.tone}" title="${escapeHtml(icon.label)}" aria-label="${escapeHtml(icon.label)}"><svg viewBox="0 0 24 24" aria-hidden="true">${icon.svg}</svg></span>`;
 }
@@ -542,7 +614,7 @@ function populateProjectSelect() {
 function populateCategoryIconSelect() {
   const select = byId("categoryIconSelect");
   if (!select) return;
-  select.innerHTML = Object.entries(categoryIcons).map(([id, icon]) => `<option value="${id}">${escapeHtml(icon.label)}</option>`).join("");
+  select.innerHTML = Object.entries(financeIconCatalog).map(([id, icon]) => `<option value="${id}">${escapeHtml(icon[0])}</option>`).join("");
 }
 
 function populateStoreSelect() {
