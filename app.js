@@ -892,6 +892,65 @@ async function parseQrFile(file) {
   return codes.map((code) => code.rawValue).join("\n");
 }
 
+async function detectQrFromBlob(blob) {
+  if (!("BarcodeDetector" in window)) return "";
+  try {
+    const detector = new BarcodeDetector({ formats: ["qr_code"] });
+    const bitmap = await createImageBitmap(blob);
+    const codes = await detector.detect(bitmap);
+    return codes.map((code) => code.rawValue).join("\n");
+  } catch {
+    return "";
+  }
+}
+
+function findJpegRanges(bytes) {
+  const ranges = [];
+  for (let i = 0; i < bytes.length - 3; i += 1) {
+    if (bytes[i] !== 0xff || bytes[i + 1] !== 0xd8) continue;
+    for (let j = i + 2; j < bytes.length - 1; j += 1) {
+      if (bytes[j] === 0xff && bytes[j + 1] === 0xd9) {
+        ranges.push([i, j + 2]);
+        i = j + 1;
+        break;
+      }
+    }
+  }
+  return ranges;
+}
+
+function findPngRanges(bytes) {
+  const ranges = [];
+  const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  const end = [0x49, 0x45, 0x4e, 0x44];
+  for (let i = 0; i < bytes.length - sig.length; i += 1) {
+    if (!sig.every((byte, offset) => bytes[i + offset] === byte)) continue;
+    for (let j = i + sig.length; j < bytes.length - 8; j += 1) {
+      if (end.every((byte, offset) => bytes[j + offset] === byte)) {
+        ranges.push([i, j + 8]);
+        i = j + 7;
+        break;
+      }
+    }
+  }
+  return ranges;
+}
+
+async function extractQrTextFromPdfImages(file) {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const imageBlobs = [
+    ...findJpegRanges(bytes).map(([start, end]) => new Blob([bytes.slice(start, end)], { type: "image/jpeg" })),
+    ...findPngRanges(bytes).map(([start, end]) => new Blob([bytes.slice(start, end)], { type: "image/png" }))
+  ];
+  const texts = [];
+  for (const blob of imageBlobs.slice(0, 40)) {
+    const text = await detectQrFromBlob(blob);
+    if (text) texts.push(text);
+  }
+  return texts.join("\n");
+}
+
 document.addEventListener("click", (event) => {
   const nav = event.target.closest("[data-view]");
   const jump = event.target.closest("[data-view-jump]");
@@ -1043,12 +1102,37 @@ byId("pdfInput")?.addEventListener("change", async (event) => {
   try {
     const text = await extractPdfText(file);
     const rows = parseStatementText(text, file.name);
+    const source = `PDF: ${file.name}`;
     if (!rows.length) {
-      byId("importResult").textContent = "Не удалось найти операции в PDF. Если в выписке есть QR, сделайте скриншот QR и загрузите его в поле «QR из выписки».";
+      byId("importResult").textContent = `В тексте PDF операций нет, проверяю QR подлинности внутри ${file.name}...`;
+      const qrText = await extractQrTextFromPdfImages(file);
+      if (qrText) {
+        state.importArchive.unshift({
+          id: `verified-${Date.now()}`,
+          archivedAt: new Date().toISOString(),
+          source: `PDF QR: ${file.name}`,
+          reason: "QR подлинности найден, но операции в QR не хранятся",
+          existingId: "",
+          row: { date: new Date().toISOString().slice(0, 10), description: file.name, amount: 0, account: "PDF импорт", category: "Подлинность" }
+        });
+      }
+    }
+    if (!rows.length) {
+      state.importArchive.unshift({
+        id: `unparsed-${Date.now()}`,
+        archivedAt: new Date().toISOString(),
+        source: `PDF: ${file.name}`,
+        reason: "файл проверен, текстовые операции не найдены",
+        existingId: "",
+        row: { date: new Date().toISOString().slice(0, 10), description: file.name, amount: 0, account: "PDF импорт", category: "Не распознано" }
+      });
+      saveState();
+      renderImportArchive();
+      byId("importResult").textContent = "PDF проверен, но операции не найдены. QR подтверждает подлинность выписки, но не содержит список операций. Нужен PDF с текстовой таблицей операций или CSV/Excel-выгрузка.";
       return;
     }
-    const result = importRows(rows, `PDF: ${file.name}`);
-    byId("importResult").textContent = `PDF обработан: добавлено ${result.added}, дубликатов в архиве ${result.duplicates}.`;
+    const result = importRows(rows, source);
+    byId("importResult").textContent = `${source} обработан: добавлено ${result.added}, дубликатов в архиве ${result.duplicates}.`;
   } catch (error) {
     byId("importResult").textContent = `PDF не распознан: ${error.message || error}`;
   } finally {
@@ -1059,16 +1143,24 @@ byId("pdfInput")?.addEventListener("change", async (event) => {
 byId("qrInput")?.addEventListener("change", async (event) => {
   const file = event.target.files[0];
   if (!file) return;
-  byId("importResult").textContent = `Сканирую QR ${file.name}...`;
+  byId("importResult").textContent = `Проверяю QR подлинности ${file.name}...`;
   try {
     const text = await parseQrFile(file);
-    const rows = parseQrText(text, file.name);
-    if (!rows.length) {
-      byId("importResult").textContent = "QR распознан, но в нем не нашлось суммы операции. Попробуйте другой QR или PDF с текстовым слоем.";
+    if (!text) {
+      byId("importResult").textContent = "QR на изображении не найден. Попробуйте более четкий скриншот только с QR-кодом.";
       return;
     }
-    const result = importRows(rows, `QR: ${file.name}`);
-    byId("importResult").textContent = `QR обработан: добавлено ${result.added}, дубликатов в архиве ${result.duplicates}.`;
+    state.importArchive.unshift({
+      id: `qr-verified-${Date.now()}`,
+      archivedAt: new Date().toISOString(),
+      source: `QR: ${file.name}`,
+      reason: "QR подлинности выписки распознан; операции из QR не импортируются",
+      existingId: "",
+      row: { date: new Date().toISOString().slice(0, 10), description: file.name, amount: 0, account: "QR подлинности", category: "Подлинность" }
+    });
+    saveState();
+    renderImportArchive();
+    byId("importResult").textContent = "QR подлинности распознан и сохранен в архиве импорта. Для добавления операций загрузите PDF с текстовой таблицей операций или CSV/Excel-выгрузку.";
   } catch (error) {
     byId("importResult").textContent = `QR не распознан: ${error.message || error}`;
   } finally {

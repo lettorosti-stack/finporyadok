@@ -139,15 +139,15 @@
         <section class="view" id="import">
           <section class="panel">
             <div class="panel-head"><h2>Импорт AndroMoney / банковской выписки</h2><button id="parsePasteBtn">Проверить текст</button></div>
-            <p class="hint">Поддерживается CSV с разделителем `;`, PDF-выписки с текстовым слоем и QR со скриншота/фото. Дубликаты PDF/QR-операций архивируются и не добавляются повторно.</p>
+            <p class="hint">Поддерживается CSV с разделителем `;` и PDF-выписки с текстовым слоем. QR со скриншота/фото используется только для отметки подлинности выписки, операции из QR не создаются.</p>
             <label>CSV<input id="fileInput" type="file" accept=".csv,text/csv" /></label>
             <label>PDF выписка<input id="pdfInput" type="file" accept=".pdf,application/pdf" /></label>
-            <label>QR из выписки<input id="qrInput" type="file" accept="image/*" /></label>
+            <label>QR подлинности выписки<input id="qrInput" type="file" accept="image/*" /></label>
             <textarea id="pasteImport" placeholder="Можно вставить CSV сюда"></textarea>
             <div id="importResult" class="import-result">Импортированный файл уже загружен в приложение: AndroMoney1.csv.</div>
           </section>
           <section class="panel">
-            <div class="panel-head"><h2>Архив дубликатов импорта</h2></div>
+            <div class="panel-head"><h2>Архив импорта</h2></div>
             <div id="duplicateArchive" class="stack"></div>
           </section>
         </section>
