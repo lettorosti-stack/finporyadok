@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ФинПорядок</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-logo">ФП</div>
+          <div>
+            <strong>ФинПорядок</strong>
+            <span>offline-first учет</span>
+          </div>
+        </div>
+
+        <nav class="nav" id="nav">
+          <button class="active" data-view="dashboard">Главная</button>
+          <button data-view="transactions">Операции</button>
+          <button data-view="accounts">Счета</button>
+          <button data-view="budgets">Бюджеты</button>
+          <button data-view="alimony">Алименты</button>
+          <button data-view="shopping">Покупки</button>
+          <button data-view="reports">Отчеты</button>
+          <button data-view="import">Импорт</button>
+          <button data-view="settings">Настройки</button>
+        </nav>
+
+        <section class="side-card">
+          <span>Источник данных</span>
+          <strong id="sourceName">AndroMoney1.csv</strong>
+          <small id="sourceMeta">Загрузка...</small>
+        </section>
+
+        <section class="side-card">
+          <span>Очередь проверки</span>
+          <strong id="reviewCount">0</strong>
+          <small>новые, спорные и импортированные операции</small>
+        </section>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <h1 id="pageTitle">Главная</h1>
+            <p id="pageSubtitle">Сводка по счетам, операциям и обязательствам.</p>
+          </div>
+          <div class="top-actions">
+            <input id="searchInput" type="search" placeholder="Поиск по операциям, категориям, счетам" />
+            <button id="addTxBtn">+ Операция</button>
+          </div>
+        </header>
+
+        <section class="view active" id="dashboard">
+          <div class="metric-grid">
+            <article class="metric"><span>Операций</span><strong id="metricCount">0</strong><small id="metricPeriod">-</small></article>
+            <article class="metric"><span>Доходы</span><strong class="good" id="metricIncome">0 ₽</strong><small>по импортированным данным</small></article>
+            <article class="metric"><span>Расходы</span><strong class="bad" id="metricExpense">0 ₽</strong><small>без ручной правки</small></article>
+            <article class="metric"><span>Итог</span><strong id="metricNet">0 ₽</strong><small>доходы минус расходы</small></article>
+          </div>
+
+          <div class="dashboard-grid">
+            <section class="panel wide">
+              <div class="panel-head"><h2>Последние операции</h2><button data-view-jump="transactions">Все операции</button></div>
+              <div class="table-wrap"><table><thead><tr><th>Дата</th><th>Описание</th><th>Категория</th><th>Счет</th><th>Проект</th><th class="amount">Сумма</th></tr></thead><tbody id="latestRows"></tbody></table></div>
+            </section>
+            <section class="panel">
+              <div class="panel-head"><h2>Счета</h2><button data-view-jump="accounts">Открыть</button></div>
+              <div id="accountSummary" class="stack"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-head"><h2>Категории</h2><button data-view-jump="reports">Отчет</button></div>
+              <div id="categorySummary" class="stack"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="transactions">
+          <div class="filters">
+            <select id="accountFilter"><option value="all">Все счета</option></select>
+            <select id="categoryFilter"><option value="all">Все категории</option></select>
+            <select id="typeFilter"><option value="all">Все типы</option><option value="income">Доход</option><option value="expense">Расход</option><option value="transfer">Перевод</option></select>
+            <button id="clearFilters">Сбросить</button>
+          </div>
+          <section class="panel">
+            <div class="table-wrap"><table><thead><tr><th>Дата</th><th>Описание</th><th>Категория</th><th>Счет</th><th>Контрагент</th><th>Проект</th><th class="amount">Сумма</th></tr></thead><tbody id="transactionRows"></tbody></table></div>
+          </section>
+        </section>
+
+        <section class="view" id="accounts">
+          <div class="cards-grid" id="accountCards"></div>
+        </section>
+
+        <section class="view" id="budgets">
+          <div class="panel-head page-actions"><h2>Бюджеты по крупнейшим категориям</h2><button id="autoBudgetBtn">Сформировать лимиты</button></div>
+          <div class="cards-grid" id="budgetCards"></div>
+        </section>
+
+        <section class="view" id="alimony">
+          <div class="metric-grid three">
+            <article class="metric"><span>Проект алиментов</span><strong id="alimonyTotal">0 ₽</strong><small>расходы/платежи по проекту</small></article>
+            <article class="metric"><span>Записей</span><strong id="alimonyCount">0</strong><small>операций с проектом «Алименты»</small></article>
+            <article class="metric"><span>Правило учета</span><strong>Факт</strong><small>начисления не считаются доходом</small></article>
+          </div>
+          <section class="panel">
+            <div class="table-wrap"><table><thead><tr><th>Дата</th><th>Описание</th><th>Категория</th><th>Счет</th><th class="amount">Сумма</th></tr></thead><tbody id="alimonyRows"></tbody></table></div>
+          </section>
+        </section>
+
+        <section class="view" id="shopping">
+          <div class="dashboard-grid">
+            <section class="panel">
+              <div class="panel-head"><h2>Список покупок</h2><button id="addShoppingBtn">+ Товар</button></div>
+              <div id="shoppingList" class="stack"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-head"><h2>Прогноз повторных покупок</h2></div>
+              <div id="purchasePredictions" class="stack"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="reports">
+          <div class="dashboard-grid">
+            <section class="panel">
+              <div class="panel-head"><h2>Расходы по категориям</h2></div>
+              <div id="reportCategories" class="stack"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-head"><h2>Проекты</h2></div>
+              <div id="reportProjects" class="stack"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="import">
+          <section class="panel">
+            <div class="panel-head"><h2>Импорт AndroMoney / банковской выписки</h2><button id="parsePasteBtn">Проверить текст</button></div>
+            <p class="hint">Поддерживается CSV с разделителем `;`: Описание, Дата, Сумма, Баланс, Категория, Счет, Проект.</p>
+            <input id="fileInput" type="file" accept=".csv,text/csv" />
+            <textarea id="pasteImport" placeholder="Можно вставить CSV сюда"></textarea>
+            <div id="importResult" class="import-result">Импортированный файл уже загружен в приложение: AndroMoney1.csv.</div>
+          </section>
+        </section>
+
+        <section class="view" id="settings">
+          <div class="cards-grid">
+            <article class="card"><h3>Локальное хранение</h3><p>Данные работают офлайн. Импортированный набор сохранен в локальном файле приложения.</p></article>
+            <article class="card"><h3>Синхронизация</h3><p>По ТЗ изменения сначала пишутся локально, затем попадают в outbox для будущей облачной синхронизации.</p></article>
+            <article class="card"><h3>Безопасность</h3><p>Следующий этап: шифрование локальной базы и отдельные роли семейного доступа.</p></article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="txDialog">
+      <form method="dialog" id="txForm">
+        <header><h2>Новая операция</h2><button type="button" data-close>×</button></header>
+        <label>Дата<input name="date" type="date" required /></label>
+        <label>Описание<input name="description" required /></label>
+        <label>Сумма<input name="amount" type="number" step="0.01" required /></label>
+        <label>Категория<input name="category" required /></label>
+        <label>Счет<input name="account" required /></label>
+        <menu><button type="button" data-close>Отмена</button><button>Сохранить</button></menu>
+      </form>
+    </dialog>
+
+    <script src="./andromoney-data.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
