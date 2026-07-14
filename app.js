@@ -777,6 +777,7 @@ function normalizeOperationText(value) {
 
 function operationFingerprint(row) {
   return [
+    normalizeOperationText(row.authCode || ""),
     row.date || "",
     Math.round(Number(row.amount || 0) * 100),
     normalizeOperationText(row.account || ""),
@@ -855,6 +856,30 @@ function extractPdfTextOperators(text) {
 
 function parsePdfCMaps(text) {
   const map = new Map();
+  text.split(/\r?\n/).forEach((line) => {
+    const range = line.match(/^\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/);
+    if (range) {
+      const [, a, b, c] = range;
+      const start = parseInt(a, 16);
+      const end = parseInt(b, 16);
+      const dst = parseInt(c, 16);
+      if (Number.isFinite(start) && Number.isFinite(end) && Number.isFinite(dst) && end >= start && end - start < 10000) {
+        for (let code = start; code <= end; code += 1) map.set(code, String.fromCodePoint(dst + code - start));
+      }
+      return;
+    }
+    const single = line.match(/^\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/);
+    if (!single) return;
+    const [, a, b] = single;
+    const code = parseInt(a, 16);
+    const dst = parseInt(b, 16);
+    if (Number.isFinite(code) && Number.isFinite(dst)) map.set(code, String.fromCodePoint(dst));
+  });
+  return map;
+}
+
+function parsePdfCMapsLegacy(text) {
+  const map = new Map();
   text.replace(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g, (_, a, b, c) => {
     const start = parseInt(a, 16);
     const end = parseInt(b, 16);
@@ -927,39 +952,117 @@ function extractPdfTextOperatorsWithCMap(text, cmap) {
 
 async function inflatePdfStream(bytes) {
   if (!("DecompressionStream" in window)) return "";
-  try {
-    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate"));
-    const buffer = await new Response(stream).arrayBuffer();
-    return new TextDecoder("windows-1251").decode(buffer);
-  } catch {
-    return "";
+  let start = 0;
+  let end = bytes.length;
+  while (start < end && (bytes[start] === 10 || bytes[start] === 13)) start += 1;
+  while (end > start && (bytes[end - 1] === 10 || bytes[end - 1] === 13)) end -= 1;
+  const clean = bytes.slice(start, end);
+  for (const format of ["deflate", "deflate-raw"]) {
+    try {
+      const stream = new Blob([clean]).stream().pipeThrough(new DecompressionStream(format));
+      const buffer = await new Response(stream).arrayBuffer();
+      const inflated = new Uint8Array(buffer);
+      let out = "";
+      for (let i = 0; i < inflated.length; i += 8192) {
+        out += String.fromCharCode(...inflated.slice(i, i + 8192));
+      }
+      if (out) return out;
+    } catch {
+      // Try the next deflate flavor.
+    }
   }
+  return "";
 }
 
 async function extractPdfText(file) {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
   const raw = new TextDecoder("windows-1252").decode(bytes);
-  const cmap = new Map();
-  extractPdfTextOperators(raw);
-  const parts = [];
+  const streams = [];
   const streamRegex = /<<(?:.|[\r\n])*?\/Filter\s*\/FlateDecode(?:.|[\r\n])*?>>\s*stream\r?\n/g;
   let match;
   while ((match = streamRegex.exec(raw))) {
+    if (/\/Subtype\s*\/Image|\/BitsPerComponent|\/ColorSpace/.test(match[0])) continue;
     const start = match.index + match[0].length;
     const end = raw.indexOf("endstream", start);
     if (end < 0) break;
     const inflated = await inflatePdfStream(bytes.slice(start, end));
-    if (inflated) {
-      for (const [key, value] of parsePdfCMaps(inflated)) cmap.set(key, value);
-      parts.push(extractPdfTextOperatorsWithCMap(inflated, cmap), extractPdfTextOperators(inflated), inflated);
-    }
+    if (inflated && (/begincmap|beginbfchar|beginbfrange|\bTj\b|\bTJ\b|BT|ET/.test(inflated))) streams.push(inflated);
   }
-  parts.unshift(extractPdfTextOperatorsWithCMap(raw, cmap), extractPdfTextOperators(raw));
+  const cmap = new Map();
+  streams.forEach((stream) => {
+    for (const [key, value] of parsePdfCMaps(stream)) cmap.set(key, value);
+  });
+  const parts = [
+    extractPdfTextOperatorsWithCMap(raw, cmap),
+    extractPdfTextOperators(raw),
+    ...streams.flatMap((stream) => [extractPdfTextOperatorsWithCMap(stream, cmap), extractPdfTextOperators(stream)])
+  ];
   return parts.join("\n").replace(/\u0000/g, "").replace(/\u00a0/g, " ");
 }
 
+function parseMoneyText(value) {
+  const text = String(value || "").replace(/\s/g, "").replace(",", ".");
+  const sign = text.startsWith("+") ? 1 : -1;
+  const number = Number(text.replace(/^\+/, ""));
+  if (!Number.isFinite(number)) return null;
+  return sign * Math.abs(number);
+}
+
+function looksLikeDate(value) {
+  return /^\d{2}[./-]\d{2}[./-]\d{4}$/.test(String(value || "").trim());
+}
+
+function looksLikeTime(value) {
+  return /^\d{2}:\d{2}$/.test(String(value || "").trim());
+}
+
+function looksLikeAmount(value) {
+  return /^[+]?\s?\d[\d\s]*,\d{2}$/.test(String(value || "").trim());
+}
+
+function parseSberStatementText(text, source) {
+  if (!/СберБанк|Сбербанк|Расшифровка операций/i.test(text)) return [];
+  const lines = text.split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const accountMatch = text.match(/(?:Visa|Mastercard|МИР|Mir)?\s*[^\\n]*\*\*+\s*(\d{4})/i);
+  const account = accountMatch ? `Сбербанк •• ${accountMatch[1]}` : "Сбербанк";
+  const rows = [];
+  for (let i = 0; i < lines.length - 5; i += 1) {
+    if (!looksLikeDate(lines[i]) || !looksLikeTime(lines[i + 1])) continue;
+    const category = lines[i + 2];
+    const amountLine = lines[i + 3];
+    const processingDate = lines[i + 4];
+    const authCode = lines[i + 5];
+    const description = lines[i + 6] || category;
+    if (!looksLikeAmount(amountLine) || !looksLikeDate(processingDate) || !/^\d{4,8}$/.test(authCode)) continue;
+    const [day, month, year] = lines[i].split(".");
+    const amount = parseMoneyText(amountLine);
+    if (amount === null) continue;
+    rows.push({
+      id: `sber-pdf-${Date.now()}-${rows.length}`,
+      date: `${year}-${month}-${day}`,
+      description,
+      amount,
+      balance: 0,
+      category: category || "Без категории",
+      account,
+      payee: description.replace(/\.?\s*Операция по карте.*$/i, ""),
+      project: "",
+      from: amount < 0 ? account : "",
+      to: amount >= 0 ? account : "",
+      authCode,
+      processingDate
+    });
+    i += 5;
+  }
+  return rows;
+}
+
 function parseStatementText(text, source) {
+  const sberRows = parseSberStatementText(text, source);
+  if (sberRows.length) return sberRows;
   const rows = [];
   const lines = text.split(/\r?\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
   const datePattern = /(\d{2})[./-](\d{2})[./-](\d{2,4})/;
