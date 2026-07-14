@@ -1,14 +1,17 @@
 const storeKey = "finporyadok.state.v2";
 const seedRows = window.ANDROMONEY_DATA?.rows || [];
+const savedState = loadState();
 
 const state = {
-  rows: loadRows(),
+  rows: savedState.rows,
+  accounts: savedState.accounts,
   shopping: [
     { name: "Молоко", qty: "2 л", days: 4, price: 92 },
     { name: "Корм", qty: "3 кг", days: 26, price: 1450 },
     { name: "Стиральный порошок", qty: "1 уп.", days: 32, price: 620 }
   ]
 };
+ensureRowIds();
 
 const views = {
   dashboard: ["Главная", "Сводка по счетам, операциям и обязательствам."],
@@ -22,16 +25,23 @@ const views = {
   settings: ["Настройки", "Офлайн-режим, синхронизация и безопасность."]
 };
 
-function loadRows() {
+function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(storeKey) || "null");
-    if (saved?.rows?.length) return saved.rows;
+    return {
+      rows: saved?.rows?.length ? saved.rows : seedRows,
+      accounts: Array.isArray(saved?.accounts) ? saved.accounts : []
+    };
   } catch {}
-  return seedRows;
+  return { rows: seedRows, accounts: [] };
+}
+
+function saveState() {
+  localStorage.setItem(storeKey, JSON.stringify({ rows: state.rows, accounts: state.accounts }));
 }
 
 function saveRows() {
-  localStorage.setItem(storeKey, JSON.stringify({ rows: state.rows }));
+  saveState();
 }
 
 function money(value) {
@@ -42,9 +52,29 @@ function byId(id) {
   return document.getElementById(id);
 }
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#039;"
+  }[char]));
+}
+
 function typeOf(row) {
   if (row.from && row.to && Math.abs(row.amount) < 0.01) return "transfer";
   return row.amount >= 0 ? "income" : "expense";
+}
+
+function ensureRowIds() {
+  state.rows.forEach((row, index) => {
+    if (!row.id) row.id = `row-${index}-${row.date || "date"}-${Math.round(Number(row.amount) || 0)}`;
+  });
+}
+
+function categoryRoot(row) {
+  return String(row.category || "Без категории").split(":")[0];
 }
 
 function topBy(rows, key, filter = () => true) {
@@ -61,6 +91,32 @@ function topBy(rows, key, filter = () => true) {
     map.set(name, item);
   });
   return [...map.values()].sort((a, b) => b.total - a.total);
+}
+
+function accountSummaries() {
+  const map = new Map(topBy(state.rows, (row) => row.account).map((item) => [item.name, item]));
+  state.accounts.forEach((account) => {
+    const name = account.name?.trim();
+    if (!name) return;
+    const existing = map.get(name);
+    if (existing) {
+      existing.type = account.type || existing.type;
+      if (!existing.balance && account.balance) existing.balance = Number(account.balance) || 0;
+      return;
+    }
+    map.set(name, {
+      name,
+      total: Math.abs(Number(account.balance) || 0),
+      count: 0,
+      latest: "создан вручную",
+      balance: Number(account.balance) || 0,
+      type: account.type || "Счет"
+    });
+  });
+  return [...map.values()].sort((a, b) => {
+    if (a.count !== b.count) return b.count - a.count;
+    return a.name.localeCompare(b.name, "ru");
+  });
 }
 
 function summary() {
@@ -102,22 +158,22 @@ function renderDashboard() {
   const latest = [...state.rows].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
   byId("latestRows").innerHTML = latest.map(rowTemplate).join("");
 
-  const accounts = topBy(state.rows, (row) => row.account).sort((a, b) => b.latest.localeCompare(a.latest)).slice(0, 6);
+  const accounts = accountSummaries().slice(0, 6);
   byId("accountSummary").innerHTML = accounts.map((item) => summaryRow(item.name, `${item.count} операций`, money(item.balance))).join("");
 
-  const cats = topBy(state.rows, (row) => row.category.split(":")[0], (row) => row.amount < 0).slice(0, 6);
+  const cats = topBy(state.rows, categoryRoot, (row) => row.amount < 0).slice(0, 6);
   byId("categorySummary").innerHTML = cats.map((item) => progressRow(item.name, item.count, item.total, cats[0]?.total || 1)).join("");
 }
 
 function rowTemplate(row) {
   const kind = typeOf(row);
   const cls = row.amount >= 0 ? "good" : "bad";
-  return `<tr>
-    <td>${row.date}</td>
-    <td>${row.description || "Операция"}</td>
-    <td><span class="tag">${row.category || "Без категории"}</span></td>
-    <td>${row.account || "-"}</td>
-    <td>${row.project || "-"}</td>
+  return `<tr class="clickable-row" data-row-id="${escapeHtml(row.id)}" tabindex="0">
+    <td>${escapeHtml(row.date)}</td>
+    <td>${escapeHtml(row.description || "Операция")}</td>
+    <td><span class="tag">${escapeHtml(row.category || "Без категории")}</span></td>
+    <td>${escapeHtml(row.account || "-")}</td>
+    <td>${escapeHtml(row.project || "-")}</td>
     <td class="amount ${cls}">${kind === "transfer" ? "0 ₽" : money(row.amount)}</td>
   </tr>`;
 }
@@ -132,8 +188,9 @@ function progressRow(title, count, total, max) {
 }
 
 function renderFilters() {
-  fillSelect("accountFilter", topBy(state.rows, (row) => row.account).map((x) => x.name));
-  fillSelect("categoryFilter", topBy(state.rows, (row) => row.category.split(":")[0]).map((x) => x.name));
+  fillSelect("accountFilter", accountSummaries().map((x) => x.name));
+  fillSelect("categoryFilter", topBy(state.rows, categoryRoot).map((x) => x.name));
+  populateAccountSelect();
 }
 
 function fillSelect(id, values) {
@@ -154,25 +211,29 @@ function filteredRows() {
     const hay = `${row.description} ${row.category} ${row.account} ${row.project} ${row.payee}`.toLowerCase();
     return (!query || hay.includes(query))
       && (account === "all" || row.account === account)
-      && (category === "all" || row.category.split(":")[0] === category)
+      && (category === "all" || categoryRoot(row) === category)
       && (type === "all" || typeOf(row) === type);
   });
 }
 
 function renderTransactions() {
-  byId("transactionRows").innerHTML = filteredRows().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 500).map((row) => {
+  const rows = filteredRows().sort((a, b) => b.date.localeCompare(a.date));
+  byId("transactionRows").innerHTML = rows.slice(0, 500).map((row) => {
     const cls = row.amount >= 0 ? "good" : "bad";
-    return `<tr><td>${row.date}</td><td>${row.description}</td><td><span class="tag">${row.category}</span></td><td>${row.account}</td><td>${row.payee || "-"}</td><td>${row.project || "-"}</td><td class="amount ${cls}">${money(row.amount)}</td></tr>`;
+    return `<tr class="clickable-row" data-row-id="${escapeHtml(row.id)}" tabindex="0"><td>${escapeHtml(row.date)}</td><td>${escapeHtml(row.description)}</td><td><span class="tag">${escapeHtml(row.category)}</span></td><td>${escapeHtml(row.account)}</td><td>${escapeHtml(row.payee || "-")}</td><td>${escapeHtml(row.project || "-")}</td><td class="amount ${cls}">${money(row.amount)}</td></tr>`;
   }).join("");
+  if (document.querySelector("#transactions.view.active")) {
+    byId("pageSubtitle").textContent = `Найдено ${rows.length.toLocaleString("ru-RU")} операций. Нажмите на строку, чтобы открыть детали.`;
+  }
 }
 
 function renderAccounts() {
-  const accounts = topBy(state.rows, (row) => row.account).sort((a, b) => b.latest.localeCompare(a.latest));
-  byId("accountCards").innerHTML = accounts.map((item) => `<article class="card"><h3>${item.name}</h3><p>${item.count} операций • последнее движение ${item.latest}</p><strong>${money(item.balance)}</strong></article>`).join("");
+  const accounts = accountSummaries();
+  byId("accountCards").innerHTML = accounts.map((item) => `<article class="card"><h3>${escapeHtml(item.name)}</h3><p>${escapeHtml(item.type || "Счет")} • ${item.count} операций • ${escapeHtml(item.latest)}</p><strong>${money(item.balance)}</strong></article>`).join("");
 }
 
 function renderBudgets() {
-  const cats = topBy(state.rows, (row) => row.category.split(":")[0], (row) => row.amount < 0).slice(0, 12);
+  const cats = topBy(state.rows, categoryRoot, (row) => row.amount < 0).slice(0, 12);
   byId("budgetCards").innerHTML = cats.map((item) => {
     const limit = Math.ceil((item.total / Math.max(1, item.count)) * 8 / 1000) * 1000;
     const pct = Math.min(100, Math.round((item.total / Math.max(item.total, limit * item.count / 8)) * 100));
@@ -194,10 +255,43 @@ function renderShopping() {
 }
 
 function renderReports() {
-  const cats = topBy(state.rows, (row) => row.category.split(":")[0], (row) => row.amount < 0).slice(0, 14);
+  const cats = topBy(state.rows, categoryRoot, (row) => row.amount < 0).slice(0, 14);
   const projects = topBy(state.rows, (row) => row.project, (row) => row.project).slice(0, 14);
   byId("reportCategories").innerHTML = cats.map((item) => progressRow(item.name, item.count, item.total, cats[0]?.total || 1)).join("");
   byId("reportProjects").innerHTML = projects.map((item) => progressRow(item.name, item.count, item.total, projects[0]?.total || 1)).join("");
+}
+
+function populateAccountSelect() {
+  const select = byId("txAccountSelect");
+  if (!select) return;
+  const current = select.value;
+  const accounts = accountSummaries().map((item) => item.name);
+  select.innerHTML = accounts.length
+    ? accounts.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("")
+    : `<option value="Наличные">Наличные</option>`;
+  if (accounts.includes(current)) select.value = current;
+}
+
+function showOperationDetails(id) {
+  const row = state.rows.find((item) => String(item.id) === String(id));
+  if (!row) return;
+  const kind = typeOf(row);
+  const detailRows = [
+    ["Дата", row.date],
+    ["Описание", row.description || "Операция"],
+    ["Тип", kind === "income" ? "Доход" : kind === "expense" ? "Расход" : "Перевод"],
+    ["Сумма", kind === "transfer" ? "0 ₽" : money(row.amount)],
+    ["Категория", row.category || "Без категории"],
+    ["Счет", row.account || "-"],
+    ["Контрагент", row.payee || "-"],
+    ["Проект", row.project || "-"],
+    ["Счет списания", row.from || "-"],
+    ["Счет зачисления", row.to || "-"],
+    ["Баланс после операции", money(row.balance)],
+    ["ID", row.id || "-"]
+  ];
+  byId("operationDetails").innerHTML = detailRows.map(([label, value]) => `<div class="detail-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+  byId("detailDialog").showModal();
 }
 
 function setView(id) {
@@ -205,6 +299,7 @@ function setView(id) {
   document.querySelectorAll(".nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === id));
   byId("pageTitle").textContent = views[id]?.[0] || "ФинПорядок";
   byId("pageSubtitle").textContent = views[id]?.[1] || "";
+  if (id === "transactions") renderTransactions();
 }
 
 function parseCsvText(text) {
@@ -239,12 +334,26 @@ function parseCsvText(text) {
 document.addEventListener("click", (event) => {
   const nav = event.target.closest("[data-view]");
   const jump = event.target.closest("[data-view-jump]");
+  const row = event.target.closest("[data-row-id]");
   if (nav) setView(nav.dataset.view);
   if (jump) setView(jump.dataset.viewJump);
-  if (event.target.closest("[data-close]")) byId("txDialog").close();
+  if (row) showOperationDetails(row.dataset.rowId);
+  if (event.target.closest("[data-close]")) event.target.closest("dialog")?.close();
 });
 
-["searchInput", "accountFilter", "categoryFilter", "typeFilter"].forEach((id) => byId(id)?.addEventListener("input", renderTransactions));
+document.addEventListener("keydown", (event) => {
+  const row = event.target.closest?.("[data-row-id]");
+  if (row && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    showOperationDetails(row.dataset.rowId);
+  }
+});
+
+byId("searchInput")?.addEventListener("input", () => {
+  if (byId("searchInput").value.trim()) setView("transactions");
+  renderTransactions();
+});
+["accountFilter", "categoryFilter", "typeFilter"].forEach((id) => byId(id)?.addEventListener("input", renderTransactions));
 ["accountFilter", "categoryFilter", "typeFilter"].forEach((id) => byId(id)?.addEventListener("change", renderTransactions));
 byId("clearFilters").addEventListener("click", () => {
   byId("searchInput").value = "";
@@ -255,6 +364,7 @@ byId("clearFilters").addEventListener("click", () => {
 });
 
 byId("addTxBtn").addEventListener("click", () => {
+  populateAccountSelect();
   byId("txForm").date.value = new Date().toISOString().slice(0, 10);
   byId("txDialog").showModal();
 });
@@ -268,6 +378,29 @@ byId("txForm").addEventListener("submit", (event) => {
   render();
 });
 
+byId("addAccountBtn")?.addEventListener("click", () => {
+  byId("accountForm").reset();
+  byId("accountDialog").showModal();
+});
+
+byId("accountForm")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+  const name = data.name.trim();
+  if (!name) return;
+  const existing = state.accounts.find((account) => account.name.toLowerCase() === name.toLowerCase());
+  if (existing) {
+    existing.type = data.type;
+    existing.balance = Number(data.balance) || 0;
+  } else {
+    state.accounts.push({ id: `account-${Date.now()}`, name, type: data.type, balance: Number(data.balance) || 0 });
+  }
+  saveState();
+  byId("accountDialog").close();
+  render();
+  setView("accounts");
+});
+
 byId("fileInput").addEventListener("change", async (event) => {
   const file = event.target.files[0];
   if (!file) return;
@@ -275,7 +408,8 @@ byId("fileInput").addEventListener("change", async (event) => {
   const text = new TextDecoder("windows-1251").decode(buffer);
   const rows = parseCsvText(text);
   state.rows = rows;
-  saveRows();
+  ensureRowIds();
+  saveState();
   byId("importResult").textContent = `Загружено ${rows.length} операций из ${file.name}.`;
   render();
 });
@@ -287,7 +421,8 @@ byId("parsePasteBtn").addEventListener("click", () => {
     return;
   }
   state.rows = rows;
-  saveRows();
+  ensureRowIds();
+  saveState();
   byId("importResult").textContent = `Загружено ${rows.length} операций из вставленного CSV.`;
   render();
 });
