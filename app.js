@@ -852,6 +852,79 @@ function extractPdfTextOperators(text) {
   return chunks.join("\n");
 }
 
+
+function parsePdfCMaps(text) {
+  const map = new Map();
+  text.replace(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g, (_, a, b, c) => {
+    const start = parseInt(a, 16);
+    const end = parseInt(b, 16);
+    const dst = parseInt(c, 16);
+    if (Number.isFinite(start) && Number.isFinite(end) && Number.isFinite(dst) && end >= start && end - start < 10000) {
+      for (let code = start; code <= end; code += 1) map.set(code, String.fromCodePoint(dst + code - start));
+    }
+    return "";
+  });
+  text.replace(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g, (_, a, b) => {
+    const code = parseInt(a, 16);
+    const dst = parseInt(b, 16);
+    if (Number.isFinite(code) && Number.isFinite(dst)) map.set(code, String.fromCodePoint(dst));
+    return "";
+  });
+  return map;
+}
+
+function pdfLiteralBytes(value) {
+  const bytes = [];
+  for (let i = 0; i < value.length; i += 1) {
+    const ch = value[i];
+    if (ch !== "\\") {
+      bytes.push(ch.charCodeAt(0) & 255);
+      continue;
+    }
+    const next = value[++i] || "";
+    if (/[0-7]/.test(next)) {
+      let oct = next;
+      for (let n = 0; n < 2 && /[0-7]/.test(value[i + 1] || ""); n += 1) oct += value[++i];
+      bytes.push(parseInt(oct, 8) & 255);
+    } else {
+      const map = { n: 10, r: 13, t: 9, b: 8, f: 12, "(": 40, ")": 41, "\\": 92 };
+      bytes.push((map[next] ?? next.charCodeAt(0)) & 255);
+    }
+  }
+  return bytes;
+}
+
+function decodePdfCMapBytes(bytes, cmap) {
+  if (!cmap?.size) return "";
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 2) {
+    const code = (bytes[i] << 8) + (bytes[i + 1] || 0);
+    out += cmap.get(code) || (code >= 32 && code < 127 ? String.fromCharCode(code) : "");
+  }
+  return out;
+}
+
+function extractPdfTextOperatorsWithCMap(text, cmap) {
+  const chunks = [];
+  const pushLiteral = (literal) => {
+    const bytes = pdfLiteralBytes(literal);
+    const decoded = decodePdfCMapBytes(bytes, cmap) || decodePdfLiteral(literal);
+    if (decoded.trim()) chunks.push(decoded);
+  };
+  text.replace(/\(((?:\\.|[^\)])*)\)\s*Tj/g, (_, body) => { pushLiteral(body); return ""; });
+  text.replace(/\[((?:.|\n)*?)\]\s*TJ/g, (_, body) => {
+    let line = "";
+    body.replace(/\(((?:\\.|[^\)])*)\)|<([0-9a-fA-F\s]+)>/g, (_, lit, hex) => {
+      if (hex) line += decodePdfCMapBytes(hex.trim().match(/[0-9a-fA-F]{2}/g)?.map((x) => parseInt(x, 16)) || [], cmap) || decodePdfHex(hex);
+      else line += decodePdfCMapBytes(pdfLiteralBytes(lit), cmap) || decodePdfLiteral(lit);
+      return "";
+    });
+    if (line.trim()) chunks.push(line);
+    return "";
+  });
+  return chunks.join("\n");
+}
+
 async function inflatePdfStream(bytes) {
   if (!("DecompressionStream" in window)) return "";
   try {
@@ -867,7 +940,9 @@ async function extractPdfText(file) {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
   const raw = new TextDecoder("windows-1252").decode(bytes);
-  const parts = [extractPdfTextOperators(raw)];
+  const cmap = new Map();
+  extractPdfTextOperators(raw);
+  const parts = [];
   const streamRegex = /<<(?:.|[\r\n])*?\/Filter\s*\/FlateDecode(?:.|[\r\n])*?>>\s*stream\r?\n/g;
   let match;
   while ((match = streamRegex.exec(raw))) {
@@ -875,9 +950,13 @@ async function extractPdfText(file) {
     const end = raw.indexOf("endstream", start);
     if (end < 0) break;
     const inflated = await inflatePdfStream(bytes.slice(start, end));
-    if (inflated) parts.push(extractPdfTextOperators(inflated), inflated);
+    if (inflated) {
+      for (const [key, value] of parsePdfCMaps(inflated)) cmap.set(key, value);
+      parts.push(extractPdfTextOperatorsWithCMap(inflated, cmap), extractPdfTextOperators(inflated), inflated);
+    }
   }
-  return parts.join("\n").replace(/\u0000/g, "");
+  parts.unshift(extractPdfTextOperatorsWithCMap(raw, cmap), extractPdfTextOperators(raw));
+  return parts.join("\n").replace(/\u0000/g, "").replace(/\u00a0/g, " ");
 }
 
 function parseStatementText(text, source) {
@@ -1066,7 +1145,8 @@ byId("addTxBtn").addEventListener("click", () => {
 byId("txForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.currentTarget).entries());
-  state.rows.push({ id: `manual-${Date.now()}`, date: data.date, description: data.description, amount: Number(data.amount), balance: 0, category: data.category, account: data.account, payee: "", project: data.project || categoryMeta(data.category).project || "", from: Number(data.amount) < 0 ? data.account : "", to: Number(data.amount) >= 0 ? data.account : "" });
+  const signedAmount = data.txType === "income" ? Math.abs(Number(data.amount)) : data.txType === "transfer" ? 0 : -Math.abs(Number(data.amount));
+  state.rows.push({ id: `manual-${Date.now()}`, date: data.date, description: data.description, amount: signedAmount, balance: 0, category: data.category, account: data.account, payee: "", project: data.project || categoryMeta(data.category).project || "", from: signedAmount < 0 || data.txType === "transfer" ? data.account : "", to: signedAmount >= 0 ? data.account : "" });
   saveRows();
   byId("txDialog").close();
   render();

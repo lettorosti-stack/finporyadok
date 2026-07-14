@@ -42,6 +42,9 @@ textarea { width: 100%; min-height: 180px; padding: 12px; resize: vertical; }
 button { min-height: 36px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); }
 button:hover { border-color: #a7c7ee; background: #f5f9ff; }
 #addTxBtn, .panel-head button:first-of-type { background: var(--blue); border-color: var(--blue); color: white; }
+.button-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.app-footer { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; padding: 14px 20px 20px; color: var(--muted); }
+.app-footer strong { color: var(--ink); }
 
 .view { display: none; padding: 20px; }
 .view.active { display: block; }
@@ -68,9 +71,9 @@ th { color: var(--muted); font-size: 12px; }
 .clickable-row:hover, .clickable-row:focus { background: #f6faff; outline: none; }
 .amount { text-align: right; white-space: nowrap; }
 .tag { display: inline-flex; min-height: 22px; align-items: center; padding: 1px 7px; border-radius: 99px; background: #eef5ff; color: #155fae; font-size: 12px; }
-.bank-icon { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 30px; border-radius: 8px; background: var(--bank-bg, #eef2f7); color: var(--bank-fg, #0f172a); font-size: 11px; font-weight: 800; line-height: 1; box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .08); }
+.bank-icon { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 22px; border-radius: 6px; background: var(--bank-bg, #eef2f7); color: var(--bank-fg, #0f172a); font-size: 9px; font-weight: 800; line-height: 1; box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .08); }
 .bank-icon--default { background: #eef2f7; color: #64748b; }
-.account-pill { display: inline-grid; grid-template-columns: 30px auto; grid-template-areas: "icon name" "icon brand"; align-items: center; column-gap: 8px; max-width: 260px; vertical-align: middle; }
+.account-pill { display: inline-grid; grid-template-columns: 22px auto; grid-template-areas: "icon name" "icon brand"; align-items: center; column-gap: 6px; max-width: 260px; vertical-align: middle; }
 .account-pill .bank-icon { grid-area: icon; }
 .account-pill span:not(.bank-icon) { grid-area: name; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-pill small { grid-area: brand; color: var(--muted); font-size: 11px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -78,6 +81,22 @@ th { color: var(--muted); font-size: 12px; }
 .account-card-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .account-card-title h3 { min-width: 0; overflow-wrap: anywhere; }
 .account-preview { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fbfdff; }
+.category-icon, .store-icon { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 22px; border-radius: 6px; color: #fff; background: var(--cat-bg, var(--store-bg, #64748b)); box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .08); }
+.store-icon { color: var(--store-fg, #fff); font-size: 9px; font-weight: 800; }
+.store-icon--default { background: #e2e8f0; color: #64748b; }
+.category-icon svg { width: 15px; height: 15px; stroke: currentColor; stroke-width: 1.9; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.category-icon .fi { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.category-icon .fi [fill="currentColor"] { fill: currentColor; stroke: none; }
+.category-pill, .project-pill, .store-pill { display: inline-grid; grid-template-columns: 22px auto; grid-template-areas: "icon name" "icon sub"; align-items: center; column-gap: 6px; max-width: 280px; vertical-align: middle; }
+.category-pill .category-icon, .project-pill .category-icon, .store-pill .store-icon { grid-area: icon; }
+.category-pill span:not(.category-icon), .project-pill span:not(.category-icon), .store-pill span:not(.store-icon) { grid-area: name; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.category-pill small { grid-area: sub; color: var(--muted); font-size: 11px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.category-card-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.category-card-title h3 { min-width: 0; overflow-wrap: anywhere; }
+.account-card-title .bank-icon, .category-card-title .category-icon { width: 26px; height: 26px; flex-basis: 26px; border-radius: 7px; }
+.category-card-title .category-icon svg { width: 17px; height: 17px; }
+.category-preview { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fbfdff; }
+.shopping-row small .store-pill, .row small .store-pill { margin-left: 4px; }
 .stack { display: grid; gap: 10px; }
 .row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #fbfdff; }
 .row small { display: block; color: var(--muted); margin-top: 3px; }
@@ -106,3 +125,8 @@ dialog label { display: grid; gap: 6px; color: var(--muted); }
   .topbar, .top-actions { flex-wrap: wrap; }
   .top-actions input { width: 100%; }
 }
+
+.table-wrap .category-pill, .table-wrap .account-pill, .table-wrap .project-pill { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; }
+.table-wrap .category-pill small, .table-wrap .account-pill small { display: none; }
+.table-wrap .category-pill > span:not(.category-icon), .table-wrap .account-pill > span:not(.bank-icon), .table-wrap .project-pill > span:not(.category-icon) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.table-wrap td { vertical-align: middle; }
