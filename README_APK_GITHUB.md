@@ -11,13 +11,13 @@
 
 1. Создайте новый репозиторий на GitHub.
 2. Загрузите в него все файлы из этой папки, включая:
-   - `.github/workflows/build-apk.yml`
+   - `.github/workflows/android-apk.yml`
    - `settings.gradle`
    - `build.gradle`
    - `app/build.gradle`
    - `app/src/main/...`
 3. Откройте вкладку **Actions**.
-4. Запустите workflow **Build Android APK** вручную через **Run workflow** или сделайте push в `main`.
+4. Запустите workflow **Android APK** вручную через **Run workflow** или сделайте push в `main`.
 5. После успешной сборки скачайте артефакт **finporyadok-debug-apk**.
 6. Внутри архива будет файл:
    - `app-debug.apk`
