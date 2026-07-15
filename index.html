@@ -124,14 +124,40 @@
         </section>
 
         <section class="view" id="reports">
-          <div class="dashboard-grid">
+          <div class="report-toolbar">
+            <div>
+              <h2>Куда уходят деньги</h2>
+              <p id="reportPeriodLabel">Выберите период для анализа расходов.</p>
+            </div>
+            <select id="reportPeriod">
+              <option value="month">Месяц</option>
+              <option value="week">Неделя</option>
+              <option value="quarter">Квартал</option>
+              <option value="half">Полугодие</option>
+              <option value="year">Год</option>
+              <option value="all">Все время</option>
+            </select>
+          </div>
+
+          <div class="metric-grid three report-metrics">
+            <article class="metric"><span>Потрачено всего</span><strong id="reportTotalExpense">0 ₽</strong><small id="reportExpenseCount">0 операций</small></article>
+            <article class="metric"><span>Проекты</span><strong id="reportProjectShare">0%</strong><small id="reportProjectTotal">0 ₽ из расходов</small></article>
+            <article class="metric"><span>Категории</span><strong id="reportCategoryCount">0</strong><small>направлений расходов</small></article>
+          </div>
+
+          <section class="panel report-chart-panel">
+            <div class="panel-head"><h2>Динамика расходов</h2><span id="reportTrendTotal" class="tag">0 ₽</span></div>
+            <div id="reportHistogram" class="histogram"></div>
+          </section>
+
+          <div class="report-grid">
             <section class="panel">
-              <div class="panel-head"><h2>Расходы по категориям</h2></div>
-              <div id="reportCategories" class="stack"></div>
+              <div class="panel-head"><h2>Категории</h2><span class="tag">доля от всех расходов</span></div>
+              <div id="reportCategories" class="stack report-list"></div>
             </section>
             <section class="panel">
-              <div class="panel-head"><h2>Проекты</h2></div>
-              <div id="reportProjects" class="stack"></div>
+              <div class="panel-head"><h2>Проекты</h2><span class="tag">часть общего пирога</span></div>
+              <div id="reportProjects" class="stack report-list"></div>
             </section>
           </div>
         </section>
