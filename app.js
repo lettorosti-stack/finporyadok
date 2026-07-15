@@ -14,7 +14,6 @@ const state = {
   ]
 };
 ensureRowIds();
-reconcileTransfers();
 
 const views = {
   dashboard: ["Главная", "Сводка по счетам, операциям и обязательствам."],
@@ -69,64 +68,8 @@ function escapeHtml(value) {
 }
 
 function typeOf(row) {
-  if (row.transferMatched || (row.from && row.to && Math.abs(row.amount) < 0.01)) return "transfer";
+  if (row.from && row.to && Math.abs(row.amount) < 0.01) return "transfer";
   return row.amount >= 0 ? "income" : "expense";
-}
-
-function transferDisplayAmount(row) {
-  return money(Math.abs(Number(row.transferAmount ?? row.originalAmount ?? row.amount) || 0));
-}
-
-function isTransferLike(row) {
-  const text = normalizeBrandText(`${row.description || ""} ${row.category || ""} ${row.payee || ""}`);
-  return /(перевод|сбп|система быстрых платежей|межбанк|внутрибанк|пополнение|transfer|card2card|c2c)/.test(text);
-}
-
-function daysBetween(a, b) {
-  const da = new Date(`${a}T00:00:00`);
-  const db = new Date(`${b}T00:00:00`);
-  if (Number.isNaN(da.getTime()) || Number.isNaN(db.getTime())) return 999;
-  return Math.abs(da - db) / 86400000;
-}
-
-function reconcileTransfers() {
-  const rows = state.rows;
-  const removed = new Set();
-  for (let i = 0; i < rows.length; i += 1) {
-    const outgoing = rows[i];
-    if (removed.has(i) || typeOf(outgoing) === "transfer" || Number(outgoing.amount) >= 0 || !isTransferLike(outgoing)) continue;
-    let best = -1;
-    let bestDays = 999;
-    for (let j = 0; j < rows.length; j += 1) {
-      if (i === j || removed.has(j)) continue;
-      const incoming = rows[j];
-      if (typeOf(incoming) === "transfer" || Number(incoming.amount) <= 0 || !isTransferLike(incoming)) continue;
-      if (normalizeBrandText(outgoing.account) === normalizeBrandText(incoming.account)) continue;
-      if (Math.abs(Math.abs(Number(outgoing.amount)) - Math.abs(Number(incoming.amount))) > 0.01) continue;
-      const diff = daysBetween(outgoing.date, incoming.date);
-      if (diff > 3 || diff >= bestDays) continue;
-      best = j;
-      bestDays = diff;
-    }
-    if (best < 0) continue;
-    const incoming = rows[best];
-    const amount = Math.abs(Number(outgoing.amount));
-    outgoing.originalAmount = outgoing.amount;
-    outgoing.transferAmount = amount;
-    outgoing.amount = 0;
-    outgoing.from = outgoing.account || outgoing.from || "Счет списания";
-    outgoing.to = incoming.account || incoming.to || "Счет зачисления";
-    outgoing.account = `${outgoing.from} → ${outgoing.to}`;
-    outgoing.category = "Переводы";
-    outgoing.payee = incoming.account || outgoing.payee || "";
-    outgoing.description = `Перевод: ${outgoing.from} → ${outgoing.to}`;
-    outgoing.transferMatched = true;
-    outgoing.matchedOperationId = incoming.id || "";
-    outgoing.importSource = [outgoing.importSource, incoming.importSource].filter(Boolean).join(" + ");
-    removed.add(best);
-  }
-  if (removed.size) state.rows = rows.filter((_, index) => !removed.has(index));
-  return removed.size;
 }
 
 function ensureRowIds() {
@@ -460,7 +403,7 @@ function rowTemplate(row) {
     <td>${categoryPill(row.category)}</td>
     <td>${accountPill(row.account)}</td>
     <td>${projectPill(row.project || categoryMeta(categoryRoot(row)).project)}</td>
-    <td class="amount ${cls}">${kind === "transfer" ? transferDisplayAmount(row) : money(row.amount)}</td>
+    <td class="amount ${cls}">${kind === "transfer" ? "0 ₽" : money(row.amount)}</td>
   </tr>`;
 }
 
@@ -541,7 +484,7 @@ function renderTransactions() {
   const rows = filteredRows().sort((a, b) => b.date.localeCompare(a.date));
   byId("transactionRows").innerHTML = rows.slice(0, 500).map((row) => {
     const cls = row.amount >= 0 ? "good" : "bad";
-    return `<tr class="clickable-row" data-row-id="${escapeHtml(row.id)}" tabindex="0"><td>${escapeHtml(row.date)}</td><td>${escapeHtml(row.description)}</td><td>${categoryPill(row.category)}</td><td>${accountPill(row.account)}</td><td>${escapeHtml(row.payee || "-")}</td><td>${projectPill(row.project || categoryMeta(categoryRoot(row)).project)}</td><td class="amount ${cls}">${typeOf(row) === "transfer" ? transferDisplayAmount(row) : money(row.amount)}</td></tr>`;
+    return `<tr class="clickable-row" data-row-id="${escapeHtml(row.id)}" tabindex="0"><td>${escapeHtml(row.date)}</td><td>${escapeHtml(row.description)}</td><td>${categoryPill(row.category)}</td><td>${accountPill(row.account)}</td><td>${escapeHtml(row.payee || "-")}</td><td>${projectPill(row.project || categoryMeta(categoryRoot(row)).project)}</td><td class="amount ${cls}">${money(row.amount)}</td></tr>`;
   }).join("");
   if (document.querySelector("#transactions.view.active")) {
     byId("pageSubtitle").textContent = `Найдено ${rows.length.toLocaleString("ru-RU")} операций. Нажмите на строку, чтобы открыть детали.`;
@@ -550,7 +493,7 @@ function renderTransactions() {
 
 function renderAccounts() {
   const accounts = accountSummaries();
-  byId("accountCards").innerHTML = accounts.map((item) => `<article class="card account-card clickable-card" data-account-open="${escapeHtml(item.name)}" tabindex="0" role="button"><div class="account-card-title">${bankIcon(item.name)}<h3>${escapeHtml(item.name)}</h3></div><p>${escapeHtml(item.type || brandForAccount(item.name)?.name || "Счет")} • ${item.count} операций • ${escapeHtml(item.latest)}</p><strong>${money(item.balance)}</strong><small>Нажмите, чтобы посмотреть операции</small></article>`).join("");
+  byId("accountCards").innerHTML = accounts.map((item) => `<article class="card account-card"><div class="account-card-title">${bankIcon(item.name)}<h3>${escapeHtml(item.name)}</h3></div><p>${escapeHtml(item.type || brandForAccount(item.name)?.name || "Счет")} • ${item.count} операций • ${escapeHtml(item.latest)}</p><strong>${money(item.balance)}</strong></article>`).join("");
 }
 
 function renderBudgets() {
@@ -558,7 +501,7 @@ function renderBudgets() {
   byId("budgetCards").innerHTML = cats.map((item) => {
     const limit = Math.ceil((item.total / Math.max(1, item.count)) * 8 / 1000) * 1000;
     const pct = Math.min(100, Math.round((item.total / Math.max(item.total, limit * item.count / 8)) * 100));
-    return `<article class="card category-card clickable-card" data-category-open="${escapeHtml(item.name)}" tabindex="0" role="button"><div class="category-card-title">${categoryIcon(item.name)}<h3>${escapeHtml(item.name)}</h3></div><p>${item.count} операций • ${item.project ? `проект ${escapeHtml(item.project)} • ` : ""}рекомендованный лимит ${money(limit)}</p><div class="bar"><i style="width:${pct}%"></i></div><strong>${money(item.total)}</strong><small>Нажмите, чтобы посмотреть операции</small></article>`;
+    return `<article class="card category-card"><div class="category-card-title">${categoryIcon(item.name)}<h3>${escapeHtml(item.name)}</h3></div><p>${item.count} операций • ${item.project ? `проект ${escapeHtml(item.project)} • ` : ""}рекомендованный лимит ${money(limit)}</p><div class="bar"><i style="width:${pct}%"></i></div><strong>${money(item.total)}</strong></article>`;
   }).join("");
 }
 
@@ -974,10 +917,9 @@ function importRows(rows, source) {
   });
   state.rows.push(...added);
   state.importArchive.unshift(...duplicates);
-  const matchedTransfers = reconcileTransfers();
   saveState();
   render();
-  return { added: added.length, duplicates: duplicates.length, matchedTransfers };
+  return { added: added.length, duplicates: duplicates.length };
 }
 
 function decodePdfLiteral(value) {
@@ -1313,46 +1255,51 @@ function tbankRow(date, processingDate, amountText, description, card, index) {
 
 function parseTbankStatementText(text, source) {
   if (!/ТБАНК|Т-Банк|Tinkoff|Тинькофф|Справка о движении средств/i.test(text)) return [];
-  const lines = text.split(/\r?\n/)
-    .map((line) => line.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
+
+  const normalized = String(text || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\r/g, "\n")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const startRegex = /(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2})\s+(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2})\s+([+-]\s*\d[\d ]*[.,]\d{2})\s*₽\s+([+-]\s*\d[\d ]*[.,]\d{2})\s*₽\s+/g;
+  const starts = [...normalized.matchAll(startRegex)];
   const rows = [];
   const seen = new Set();
-  const pushRow = (row) => {
+
+  starts.forEach((match, index) => {
+    const segmentEnd = starts[index + 1]?.index ?? normalized.length;
+    let tail = normalized.slice(match.index + match[0].length, segmentEnd);
+
+    tail = tail
+      .split(/АО «ТБанк»|БИК\s+044525974|Пополнения:|Расходы:|С уважением|---\s*Страница/i)[0]
+      .trim();
+
+    const cardMatch = tail.match(/\s+(—|\d{4})(?:\s+[\d ]+[.,]\d{2}\s*₽)?\s*$/);
+    if (!cardMatch) return;
+
+    const card = cardMatch[1];
+    const description = tail.slice(0, cardMatch.index).replace(/\s+/g, " ").trim();
+    const row = tbankRow(match[1], match[3], match[6], description, card, rows.length);
     if (!row) return;
-    const key = [row.date, row.processingDate, row.amount, normalizeOperationText(row.description).replace(/\s/g, ""), row.card].join("|");
+
+    row.operationTime = match[2];
+    row.processingTime = match[4];
+    row.originalAmount = parseMoneyText(match[5]);
+
+    const key = [
+      row.date,
+      row.processingDate,
+      row.operationTime,
+      row.amount,
+      normalizeOperationText(row.description),
+      row.card
+    ].join("|");
     if (seen.has(key)) return;
     seen.add(key);
     rows.push(row);
-  };
+  });
 
-  for (let i = 0; i < lines.length - 8; i += 1) {
-    if (!looksLikeDate(lines[i]) || !looksLikeTime(lines[i + 1]) || !looksLikeDate(lines[i + 2]) || !looksLikeTime(lines[i + 3])) continue;
-    if (!looksLikeAmount(lines[i + 4]) || !/^₽|RUB|руб\.?$/i.test(lines[i + 5])) continue;
-    const descriptionParts = [];
-    let card = "";
-    let j = i + 8;
-    while (j < lines.length) {
-      const cardMatch = lines[j].match(/^(\d{4}|—)$/) || lines[j].match(/^(\d{4}|—)\s+(?=АО «ТБанк»|С уважением|Дата и времяоперации)/i);
-      if (cardMatch) {
-        card = cardMatch[1];
-        break;
-      }
-      if (looksLikeDate(lines[j]) && looksLikeTime(lines[j + 1] || "")) break;
-      descriptionParts.push(lines[j]);
-      j += 1;
-    }
-    if (!card) continue;
-    pushRow(tbankRow(lines[i], lines[i + 2], lines[i + 6], descriptionParts.join(" "), card, rows.length));
-    i = j;
-  }
-
-  const compact = lines.join("");
-  const rowRegex = /(\d{2}\.\d{2}\.\d{4})(\d{2}:\d{2})(\d{2}\.\d{2}\.\d{4})(\d{2}:\d{2})([+-]\d[\d\s]*[,.]\d{2})\s*₽([+-]\d[\d\s]*[,.]\d{2})\s*₽(.+?)(\d{4}|—)(?=\d{2}\.\d{2}\.\d{4}\d{2}:\d{2}|[₽\d\s,.]*(?:Пополнения:|Расходы:|С уважением)|АО «ТБанк»|Дата и времяоперации|$)/g;
-  let match;
-  while ((match = rowRegex.exec(compact))) {
-    pushRow(tbankRow(match[1], match[3], match[6], match[7], match[8], rows.length));
-  }
   return rows;
 }
 
@@ -1613,41 +1560,17 @@ document.addEventListener("click", (event) => {
   const nav = event.target.closest("[data-view]");
   const jump = event.target.closest("[data-view-jump]");
   const row = event.target.closest("[data-row-id]");
-  const accountCard = event.target.closest("[data-account-open]");
-  const categoryCard = event.target.closest("[data-category-open]");
   if (nav) setView(nav.dataset.view);
   if (jump) setView(jump.dataset.viewJump);
   if (row) showOperationDetails(row.dataset.rowId);
-  if (accountCard) {
-    setView("transactions");
-    byId("accountFilter").value = accountCard.dataset.accountOpen;
-    byId("categoryFilter").value = "all";
-    renderTransactions();
-  }
-  if (categoryCard) {
-    setView("transactions");
-    byId("categoryFilter").value = categoryCard.dataset.categoryOpen;
-    byId("accountFilter").value = "all";
-    renderTransactions();
-  }
   if (event.target.closest("[data-close]")) event.target.closest("dialog")?.close();
 });
 
 document.addEventListener("keydown", (event) => {
   const row = event.target.closest?.("[data-row-id]");
-  const accountCard = event.target.closest?.("[data-account-open]");
-  const categoryCard = event.target.closest?.("[data-category-open]");
   if (row && (event.key === "Enter" || event.key === " ")) {
     event.preventDefault();
     showOperationDetails(row.dataset.rowId);
-  }
-  if (accountCard && (event.key === "Enter" || event.key === " ")) {
-    event.preventDefault();
-    accountCard.click();
-  }
-  if (categoryCard && (event.key === "Enter" || event.key === " ")) {
-    event.preventDefault();
-    categoryCard.click();
   }
 });
 
@@ -1816,7 +1739,7 @@ byId("pdfInput")?.addEventListener("change", async (event) => {
       return;
     }
     const result = importRows(rows, source);
-    byId("importResult").textContent = `${source} обработан: добавлено ${result.added}, дубликатов в архиве ${result.duplicates}, сопоставлено переводов ${result.matchedTransfers || 0}.`;
+    byId("importResult").textContent = `${source} обработан: добавлено ${result.added}, дубликатов в архиве ${result.duplicates}.`;
   } catch (error) {
     byId("importResult").textContent = `PDF не распознан: ${error.message || error}`;
   } finally {
