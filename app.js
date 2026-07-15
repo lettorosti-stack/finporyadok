@@ -550,11 +550,112 @@ function renderShoppingAnalysis() {
     : `<article class="row"><div><strong>Нет истории за прошлый месяц</strong><small>Добавьте покупки с датой и магазином, чтобы увидеть сравнение цен.</small></div><b>-</b></article>`;
 }
 
+function rowDate(row) {
+  const date = new Date(`${row.date}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatShortDate(date) {
+  return date.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+}
+
+function formatPeriodDate(date) {
+  return date.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function reportPeriodRange() {
+  const value = byId("reportPeriod")?.value || "month";
+  const dates = state.rows.map(rowDate).filter(Boolean).sort((a, b) => a - b);
+  const end = dates.at(-1) || new Date();
+  const start = new Date(end);
+  const labels = { week: "Неделя", month: "Месяц", quarter: "Квартал", half: "Полугодие", year: "Год", all: "Все время" };
+  if (value === "week") start.setDate(start.getDate() - 6);
+  if (value === "month") start.setMonth(start.getMonth() - 1);
+  if (value === "quarter") start.setMonth(start.getMonth() - 3);
+  if (value === "half") start.setMonth(start.getMonth() - 6);
+  if (value === "year") start.setFullYear(start.getFullYear() - 1);
+  if (value === "all") start.setTime((dates[0] || end).getTime());
+  return { value, label: labels[value] || labels.month, start, end };
+}
+
+function rowsInReportPeriod() {
+  const range = reportPeriodRange();
+  const rows = state.rows.filter((row) => {
+    const date = rowDate(row);
+    return date && date >= range.start && date <= range.end;
+  });
+  return { ...range, rows };
+}
+
+function summarizeRows(rows, key, filter = () => true) {
+  const map = new Map();
+  rows.filter(filter).forEach((row) => {
+    const name = key(row) || "Без значения";
+    const item = map.get(name) || { name, total: 0, count: 0 };
+    item.total += Math.abs(Number(row.amount) || 0);
+    item.count += 1;
+    map.set(name, item);
+  });
+  return [...map.values()].sort((a, b) => b.total - a.total);
+}
+
+function reportShareRow(item, total, type) {
+  const pct = total ? Math.round((item.total / total) * 100) : 0;
+  const title = type === "project" ? projectPill(item.name) : categoryPill(item.name);
+  return `<article class="row share-row"><div><strong>${title}</strong><small>${pct}% пирога • ${item.count} операций • ${money(item.total)}</small><div class="bar"><i style="width:${Math.max(2, pct)}%"></i></div></div><b>${pct}%</b></article>`;
+}
+
+function buildExpenseHistogram(rows, range) {
+  const expenses = rows.filter((row) => row.amount < 0);
+  const days = Math.max(1, Math.round((range.end - range.start) / 86400000) + 1);
+  const mode = days <= 45 ? "day" : days <= 190 ? "week" : "month";
+  const buckets = new Map();
+  const bucketKey = (date) => {
+    if (mode === "day") return date.toISOString().slice(0, 10);
+    if (mode === "week") {
+      const week = new Date(date);
+      week.setDate(week.getDate() - ((week.getDay() + 6) % 7));
+      return week.toISOString().slice(0, 10);
+    }
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`;
+  };
+  const bucketLabel = (key) => {
+    const date = new Date(`${key}T00:00:00`);
+    if (mode === "month") return date.toLocaleDateString("ru-RU", { month: "short", year: "2-digit" });
+    return formatShortDate(date);
+  };
+  expenses.forEach((row) => {
+    const date = rowDate(row);
+    if (!date) return;
+    const key = bucketKey(date);
+    buckets.set(key, (buckets.get(key) || 0) + Math.abs(row.amount));
+  });
+  const values = [...buckets.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, total]) => ({ key, label: bucketLabel(key), total }));
+  const max = Math.max(...values.map((item) => item.total), 1);
+  return values.map((item) => `<div class="histogram-bar" title="${escapeHtml(item.label)} • ${money(item.total)}"><i style="height:${Math.max(4, Math.round((item.total / max) * 100))}%"></i><span>${escapeHtml(item.label)}</span></div>`).join("");
+}
+
 function renderReports() {
-  const cats = categorySummaries((row) => row.amount < 0).slice(0, 14);
-  const projects = topBy(state.rows, (row) => row.project, (row) => row.project).slice(0, 14);
-  byId("reportCategories").innerHTML = cats.map((item) => categoryProgressRow(item, cats[0]?.total || 1)).join("");
-  byId("reportProjects").innerHTML = projects.map((item) => projectProgressRow(item, projects[0]?.total || 1)).join("");
+  const range = rowsInReportPeriod();
+  const expenses = range.rows.filter((row) => row.amount < 0);
+  const totalExpense = expenses.reduce((sum, row) => sum + Math.abs(row.amount || 0), 0);
+  const categories = summarizeRows(range.rows, categoryRoot, (row) => row.amount < 0).slice(0, 12);
+  const projects = summarizeRows(range.rows, (row) => row.project || "", (row) => row.amount < 0 && row.project).slice(0, 12);
+  const projectTotal = projects.reduce((sum, item) => sum + item.total, 0);
+  byId("reportPeriodLabel").textContent = `${range.label}: ${formatPeriodDate(range.start)} - ${formatPeriodDate(range.end)}`;
+  byId("reportTotalExpense").textContent = money(totalExpense);
+  byId("reportExpenseCount").textContent = `${expenses.length.toLocaleString("ru-RU")} операций`;
+  byId("reportProjectShare").textContent = `${totalExpense ? Math.round((projectTotal / totalExpense) * 100) : 0}%`;
+  byId("reportProjectTotal").textContent = `${money(projectTotal)} из расходов`;
+  byId("reportCategoryCount").textContent = categories.length.toLocaleString("ru-RU");
+  byId("reportTrendTotal").textContent = money(totalExpense);
+  byId("reportHistogram").innerHTML = buildExpenseHistogram(range.rows, range) || `<div class="empty-state">Нет расходов за выбранный период</div>`;
+  byId("reportCategories").innerHTML = categories.length
+    ? categories.map((item) => reportShareRow(item, totalExpense, "category")).join("")
+    : `<article class="row"><div><strong>Нет расходов</strong><small>Выберите другой период или импортируйте операции.</small></div><b>-</b></article>`;
+  byId("reportProjects").innerHTML = projects.length
+    ? projects.map((item) => reportShareRow(item, totalExpense, "project")).join("")
+    : `<article class="row"><div><strong>Нет проектов</strong><small>Привяжите категории или операции к проектам, чтобы увидеть их долю.</small></div><b>-</b></article>`;
 }
 
 function renderImportArchive() {
@@ -1004,7 +1105,7 @@ async function extractPdfText(file) {
 function parseMoneyText(value) {
   const text = String(value || "").replace(/\s/g, "").replace(",", ".");
   const sign = text.startsWith("+") ? 1 : -1;
-  const number = Number(text.replace(/^\+/, ""));
+  const number = Number(text.replace(/^[+-]/, "").replace(/[₽ррубRUB]+/gi, ""));
   if (!Number.isFinite(number)) return null;
   return sign * Math.abs(number);
 }
@@ -1018,7 +1119,105 @@ function looksLikeTime(value) {
 }
 
 function looksLikeAmount(value) {
-  return /^[+]?\s?\d[\d\s]*,\d{2}$/.test(String(value || "").trim());
+  return /^[+-]?\s?\d[\d\s]*[,.]\d{2}$/.test(String(value || "").trim());
+}
+
+function parseBankDate(value) {
+  const match = String(value || "").trim().match(/^(\d{2})[./-](\d{2})[./-](\d{4})$/);
+  if (!match) return "";
+  return `${match[3]}-${match[2]}-${match[1]}`;
+}
+
+function guessStatementCategory(description, amount) {
+  const text = normalizeBrandText(description);
+  if (amount > 0 && /(кэшбек|кэшбэк|cashback|пополнение|зачисление|зарплат|процент|возврат)/.test(text)) return amount > 0 && /кэшбек|кэшбэк|cashback/.test(text) ? "Кэшбэк" : "Доходы";
+  if (/перевод|сбп|система быстрых платежей|внутрибанковский|банковский перевод/.test(text)) return "Переводы";
+  if (/пятероч|pyaterochka|magnit|магнит|svetofor|светофор|ашан|auchan|lenta|лента|перекрест|vkusvill|вкусвилл|продукт/.test(text)) return "Продукты";
+  if (/azs|rusoil|gazprom|лукойл|lukoil|топлив|бенз|заправ/.test(text)) return "Бензин";
+  if (/dodo|pizza|kafe|stolovaya|кафе|coffee|кофе|restaurant|ресторан|столов/.test(text)) return "Кафе";
+  if (/whoosh|такси|taxi|metro|транспорт|автобус/.test(text)) return "Транспорт";
+  if (/apteka|аптек|медиц|clinic|клиник/.test(text)) return "Здоровье";
+  if (/ozon|wildberries|wb|market|магазин|оплата в/.test(text)) return "Покупки";
+  return amount >= 0 ? "Доходы" : "Без категории";
+}
+
+function tbankRow(date, processingDate, amountText, description, card, index) {
+  const amount = parseMoneyText(amountText);
+  const operationDate = parseBankDate(date);
+  if (amount === null || !operationDate) return null;
+  const cleanDescription = String(description || "")
+    .replace(/\s+/g, " ")
+    .replace(/АО «ТБанк».*/i, "")
+    .replace(/Дата и времяоперации.*/i, "")
+    .replace(/С уважением.*/i, "")
+    .replace(/([A-Z]{2,})([A-Z][a-z])/g, "$1 $2")
+    .replace(/([a-zа-я])([A-ZА-Я])/g, "$1 $2")
+    .replace(/([A-Za-zА-Яа-я])(\d)/g, "$1 $2")
+    .replace(/(\d)([A-Za-zА-Яа-я])/g, "$1 $2")
+    .replace(/([а-я])с договора/gi, "$1 с договора")
+    .trim() || "Операция Т-Банка";
+  const cardSuffix = /^\d{4}$/.test(card) ? card : "";
+  const account = cardSuffix ? `Т-Банк •• ${cardSuffix}` : "Т-Банк";
+  return {
+    id: `tbank-pdf-${Date.now()}-${index}`,
+    date: operationDate,
+    description: cleanDescription,
+    amount,
+    balance: 0,
+    category: guessStatementCategory(cleanDescription, amount),
+    account,
+    payee: cleanDescription.replace(/^(Оплата в|Пополнение\.?|Внешний|Внутрибанковский)\s*/i, "").trim(),
+    project: "",
+    from: amount < 0 ? account : "",
+    to: amount >= 0 ? account : "",
+    processingDate: parseBankDate(processingDate),
+    card: cardSuffix
+  };
+}
+
+function parseTbankStatementText(text, source) {
+  if (!/ТБАНК|Т-Банк|Tinkoff|Тинькофф|Справка о движении средств/i.test(text)) return [];
+  const lines = text.split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const rows = [];
+  const seen = new Set();
+  const pushRow = (row) => {
+    if (!row) return;
+    const key = [row.date, row.processingDate, row.amount, normalizeOperationText(row.description).replace(/\s/g, ""), row.card].join("|");
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push(row);
+  };
+
+  for (let i = 0; i < lines.length - 8; i += 1) {
+    if (!looksLikeDate(lines[i]) || !looksLikeTime(lines[i + 1]) || !looksLikeDate(lines[i + 2]) || !looksLikeTime(lines[i + 3])) continue;
+    if (!looksLikeAmount(lines[i + 4]) || !/^₽|RUB|руб\.?$/i.test(lines[i + 5])) continue;
+    const descriptionParts = [];
+    let card = "";
+    let j = i + 8;
+    while (j < lines.length) {
+      const cardMatch = lines[j].match(/^(\d{4}|—)$/) || lines[j].match(/^(\d{4}|—)\s+(?=АО «ТБанк»|С уважением|Дата и времяоперации)/i);
+      if (cardMatch) {
+        card = cardMatch[1];
+        break;
+      }
+      if (looksLikeDate(lines[j]) && looksLikeTime(lines[j + 1] || "")) break;
+      descriptionParts.push(lines[j]);
+      j += 1;
+    }
+    if (!card) continue;
+    pushRow(tbankRow(lines[i], lines[i + 2], lines[i + 6], descriptionParts.join(" "), card, rows.length));
+    i = j;
+  }
+
+  const compact = lines.join("");
+  const rowRegex = /(\d{2}\.\d{2}\.\d{4})(\d{2}:\d{2})(\d{2}\.\d{2}\.\d{4})(\d{2}:\d{2})([+-]\d[\d\s]*[,.]\d{2})\s*₽([+-]\d[\d\s]*[,.]\d{2})\s*₽(.+?)(\d{4}|—)(?=\d{2}\.\d{2}\.\d{4}\d{2}:\d{2}|[₽\d\s,.]*(?:Пополнения:|Расходы:|С уважением)|АО «ТБанк»|Дата и времяоперации|$)/g;
+  let match;
+  while ((match = rowRegex.exec(compact))) {
+    pushRow(tbankRow(match[1], match[3], match[6], match[7], match[8], rows.length));
+  }
+  return rows;
 }
 
 function parseSberStatementText(text, source) {
@@ -1063,10 +1262,12 @@ function parseSberStatementText(text, source) {
 function parseStatementText(text, source) {
   const sberRows = parseSberStatementText(text, source);
   if (sberRows.length) return sberRows;
+  const tbankRows = parseTbankStatementText(text, source);
+  if (tbankRows.length) return tbankRows;
   const rows = [];
   const lines = text.split(/\r?\n/).map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean);
   const datePattern = /(\d{2})[./-](\d{2})[./-](\d{2,4})/;
-  const amountPattern = /([+-]?\s?\d[\d\s]*[,.]\d{2}|[+-]?\s?\d[\d\s]{2,})(?:\s?₽|\s?RUB|\s?руб\.?)?/i;
+  const amountPattern = /([+-]?\s?\d[\d\s]*[,.]\d{2})(?:\s?₽|\s?RUB|\s?руб\.?)?/i;
   lines.forEach((line, index) => {
     const dateMatch = line.match(datePattern);
     if (!dateMatch) return;
@@ -1081,13 +1282,14 @@ function parseStatementText(text, source) {
       .replace(amountMatch[0], "")
       .replace(/\b(RUB|руб\.?|₽)\b/gi, "")
       .trim() || "Операция из PDF";
+    if (description === "Операция из PDF" || /^(исх|тел|дата|номер|сумма|остаток|движение средств)/i.test(description)) return;
     rows.push({
       id: `pdf-${Date.now()}-${index}`,
       date: `${year}-${dateMatch[2].padStart(2, "0")}-${dateMatch[1].padStart(2, "0")}`,
       description,
       amount,
       balance: 0,
-      category: "Без категории",
+      category: guessStatementCategory(description, amount),
       account: source.replace(/\.(pdf|png|jpg|jpeg|webp)$/i, "") || "PDF импорт",
       payee: "",
       project: "",
@@ -1229,6 +1431,7 @@ byId("searchInput")?.addEventListener("input", () => {
 });
 ["accountFilter", "categoryFilter", "typeFilter"].forEach((id) => byId(id)?.addEventListener("input", renderTransactions));
 ["accountFilter", "categoryFilter", "typeFilter"].forEach((id) => byId(id)?.addEventListener("change", renderTransactions));
+byId("reportPeriod")?.addEventListener("change", renderReports);
 byId("clearFilters").addEventListener("click", () => {
   byId("searchInput").value = "";
   byId("accountFilter").value = "all";
