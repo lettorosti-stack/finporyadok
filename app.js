@@ -412,12 +412,12 @@ function summaryRow(title, sub, value) {
 }
 
 function accountSummaryRow(title, sub, value) {
-  return `<article class="row account-row"><div><strong>${accountPill(title)}</strong><small>${sub}</small></div><b>${value}</b></article>`;
+  return `<article class="row account-row drill-card" data-drill-kind="account" data-drill-value="${escapeHtml(title)}" tabindex="0"><div><strong>${accountPill(title)}</strong><small>${sub}</small></div><b>${value}</b></article>`;
 }
 
 function progressRow(title, count, total, max) {
   const pct = Math.max(3, Math.round((total / max) * 100));
-  return `<article class="row"><div><strong>${title}</strong><small>${count} операций • ${money(total)}</small><div class="bar"><i style="width:${pct}%"></i></div></div></article>`;
+  return `<article class="row drill-card" data-drill-kind="category" data-drill-value="${escapeHtml(title)}" tabindex="0"><div><strong>${title}</strong><small>${count} операций • ${money(total)}</small><div class="bar"><i style="width:${pct}%"></i></div></div></article>`;
 }
 
 function categoryProgressRow(item, max) {
@@ -493,7 +493,7 @@ function renderTransactions() {
 
 function renderAccounts() {
   const accounts = accountSummaries();
-  byId("accountCards").innerHTML = accounts.map((item) => `<article class="card account-card"><div class="account-card-title">${bankIcon(item.name)}<h3>${escapeHtml(item.name)}</h3></div><p>${escapeHtml(item.type || brandForAccount(item.name)?.name || "Счет")} • ${item.count} операций • ${escapeHtml(item.latest)}</p><strong>${money(item.balance)}</strong></article>`).join("");
+  byId("accountCards").innerHTML = accounts.map((item) => `<article class="card account-card drill-card" data-drill-kind="account" data-drill-value="${escapeHtml(item.name)}" tabindex="0"><div class="account-card-title">${bankIcon(item.name)}<h3>${escapeHtml(item.name)}</h3></div><p>${escapeHtml(item.type || brandForAccount(item.name)?.name || "Счет")} • ${item.count} операций • последнее движение ${escapeHtml(item.latest)}</p><strong>${money(item.balance)}</strong><span class="open-hint">Открыть операции →</span></article>`).join("");
 }
 
 function renderBudgets() {
@@ -501,7 +501,7 @@ function renderBudgets() {
   byId("budgetCards").innerHTML = cats.map((item) => {
     const limit = Math.ceil((item.total / Math.max(1, item.count)) * 8 / 1000) * 1000;
     const pct = Math.min(100, Math.round((item.total / Math.max(item.total, limit * item.count / 8)) * 100));
-    return `<article class="card category-card"><div class="category-card-title">${categoryIcon(item.name)}<h3>${escapeHtml(item.name)}</h3></div><p>${item.count} операций • ${item.project ? `проект ${escapeHtml(item.project)} • ` : ""}рекомендованный лимит ${money(limit)}</p><div class="bar"><i style="width:${pct}%"></i></div><strong>${money(item.total)}</strong></article>`;
+    return `<article class="card category-card drill-card" data-drill-kind="category" data-drill-value="${escapeHtml(item.name)}" tabindex="0"><div class="category-card-title">${categoryIcon(item.name)}<h3>${escapeHtml(item.name)}</h3></div><p>${item.count} операций${item.project ? ` • проект ${escapeHtml(item.project)}` : ""}</p><div class="bar"><i style="width:${pct}%"></i></div><strong>${money(item.total)}</strong><span class="open-hint">Показать затраты →</span></article>`;
   }).join("");
 }
 
@@ -602,7 +602,7 @@ function summarizeRows(rows, key, filter = () => true) {
 function reportShareRow(item, total, type) {
   const pct = total ? Math.round((item.total / total) * 100) : 0;
   const title = type === "project" ? projectPill(item.name) : categoryPill(item.name);
-  return `<article class="row share-row"><div><strong>${title}</strong><small>${pct}% пирога • ${item.count} операций • ${money(item.total)}</small><div class="bar"><i style="width:${Math.max(2, pct)}%"></i></div></div><b>${pct}%</b></article>`;
+  return `<article class="row share-row drill-card" data-drill-kind="${type}" data-drill-value="${escapeHtml(item.name)}" tabindex="0"><div><strong>${title}</strong><small>${pct}% расходов • ${item.count} операций • ${money(item.total)}</small><div class="bar"><i style="width:${Math.max(2, pct)}%"></i></div></div><b>${pct}%</b></article>`;
 }
 
 function buildExpenseHistogram(rows, range) {
@@ -813,6 +813,49 @@ function updateCategoryPreview() {
   preview.innerHTML = categoryPill(select.value || "Без категории");
 }
 
+
+function openDrilldown(kind, value) {
+  const allRows = state.rows.filter((row) => {
+    if (kind === "account") return row.account === value || row.from === value || row.to === value;
+    if (kind === "category") return categoryRoot(row) === value;
+    if (kind === "project") return (row.project || categoryMeta(categoryRoot(row)).project || "") === value;
+    return false;
+  }).sort((a, b) => b.date.localeCompare(a.date));
+  const expenses = allRows.filter((row) => row.amount < 0).reduce((sum, row) => sum + Math.abs(row.amount), 0);
+  const income = allRows.filter((row) => row.amount > 0).reduce((sum, row) => sum + row.amount, 0);
+  const titleMap = { account: "Счёт", category: "Категория", project: "Проект" };
+  byId("drillTitle").textContent = `${titleMap[kind] || "Раздел"}: ${value}`;
+  byId("drillSubtitle").textContent = `${allRows.length.toLocaleString("ru-RU")} операций • расходы ${money(expenses)} • поступления ${money(income)}`;
+  byId("drillPeriod").value = "all";
+  byId("drillSort").value = "date-desc";
+  byId("drillDialog").dataset.kind = kind;
+  byId("drillDialog").dataset.value = value;
+  renderDrilldownRows(allRows);
+  byId("drillDialog").showModal();
+}
+
+function renderDrilldownRows(sourceRows) {
+  let rows = sourceRows || [];
+  const period = byId("drillPeriod")?.value || "all";
+  if (period !== "all") {
+    const days = Number(period);
+    const maxDate = rows.map(rowDate).filter(Boolean).sort((a,b)=>b-a)[0] || new Date();
+    const minDate = new Date(maxDate); minDate.setDate(minDate.getDate() - days);
+    rows = rows.filter((row) => { const d=rowDate(row); return d && d >= minDate; });
+  }
+  const sort = byId("drillSort")?.value || "date-desc";
+  rows = [...rows].sort((a,b) => sort === "amount-desc" ? Math.abs(b.amount)-Math.abs(a.amount) : sort === "date-asc" ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date));
+  byId("drillRows").innerHTML = rows.length ? rows.map((row) => `<article class="timeline-item" data-row-id="${escapeHtml(row.id)}" tabindex="0"><div class="timeline-date">${escapeHtml(row.date)}</div><div class="timeline-main"><strong>${escapeHtml(row.description || "Операция")}</strong><small>${categoryPill(row.category)} ${accountPill(row.account)} ${row.project ? projectPill(row.project) : ""}</small></div><b class="amount ${row.amount >= 0 ? "good" : "bad"}">${typeOf(row)==="transfer" ? money(Math.abs(row.transferAmount || 0)) : money(row.amount)}</b></article>`).join("") : `<div class="empty-state">За выбранный период операций нет.</div>`;
+  byId("drillVisibleCount").textContent = `${rows.length.toLocaleString("ru-RU")} операций`;
+}
+
+function refreshDrilldown() {
+  const dialog = byId("drillDialog");
+  if (!dialog?.open) return;
+  const kind = dialog.dataset.kind; const value = dialog.dataset.value;
+  const rows = state.rows.filter((row) => kind === "account" ? (row.account === value || row.from === value || row.to === value) : kind === "category" ? categoryRoot(row) === value : (row.project || categoryMeta(categoryRoot(row)).project || "") === value);
+  renderDrilldownRows(rows);
+}
 function showOperationDetails(id) {
   const row = state.rows.find((item) => String(item.id) === String(id));
   if (!row) return;
@@ -1255,51 +1298,46 @@ function tbankRow(date, processingDate, amountText, description, card, index) {
 
 function parseTbankStatementText(text, source) {
   if (!/ТБАНК|Т-Банк|Tinkoff|Тинькофф|Справка о движении средств/i.test(text)) return [];
-
-  const normalized = String(text || "")
-    .replace(/\u00a0/g, " ")
-    .replace(/\r/g, "\n")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const startRegex = /(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2})\s+(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2})\s+([+-]\s*\d[\d ]*[.,]\d{2})\s*₽\s+([+-]\s*\d[\d ]*[.,]\d{2})\s*₽\s+/g;
-  const starts = [...normalized.matchAll(startRegex)];
+  const lines = text.split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
   const rows = [];
   const seen = new Set();
-
-  starts.forEach((match, index) => {
-    const segmentEnd = starts[index + 1]?.index ?? normalized.length;
-    let tail = normalized.slice(match.index + match[0].length, segmentEnd);
-
-    tail = tail
-      .split(/АО «ТБанк»|БИК\s+044525974|Пополнения:|Расходы:|С уважением|---\s*Страница/i)[0]
-      .trim();
-
-    const cardMatch = tail.match(/\s+(—|\d{4})(?:\s+[\d ]+[.,]\d{2}\s*₽)?\s*$/);
-    if (!cardMatch) return;
-
-    const card = cardMatch[1];
-    const description = tail.slice(0, cardMatch.index).replace(/\s+/g, " ").trim();
-    const row = tbankRow(match[1], match[3], match[6], description, card, rows.length);
+  const pushRow = (row) => {
     if (!row) return;
-
-    row.operationTime = match[2];
-    row.processingTime = match[4];
-    row.originalAmount = parseMoneyText(match[5]);
-
-    const key = [
-      row.date,
-      row.processingDate,
-      row.operationTime,
-      row.amount,
-      normalizeOperationText(row.description),
-      row.card
-    ].join("|");
+    const key = [row.date, row.processingDate, row.amount, normalizeOperationText(row.description).replace(/\s/g, ""), row.card].join("|");
     if (seen.has(key)) return;
     seen.add(key);
     rows.push(row);
-  });
+  };
 
+  for (let i = 0; i < lines.length - 8; i += 1) {
+    if (!looksLikeDate(lines[i]) || !looksLikeTime(lines[i + 1]) || !looksLikeDate(lines[i + 2]) || !looksLikeTime(lines[i + 3])) continue;
+    if (!looksLikeAmount(lines[i + 4]) || !/^₽|RUB|руб\.?$/i.test(lines[i + 5])) continue;
+    const descriptionParts = [];
+    let card = "";
+    let j = i + 8;
+    while (j < lines.length) {
+      const cardMatch = lines[j].match(/^(\d{4}|—)$/) || lines[j].match(/^(\d{4}|—)\s+(?=АО «ТБанк»|С уважением|Дата и времяоперации)/i);
+      if (cardMatch) {
+        card = cardMatch[1];
+        break;
+      }
+      if (looksLikeDate(lines[j]) && looksLikeTime(lines[j + 1] || "")) break;
+      descriptionParts.push(lines[j]);
+      j += 1;
+    }
+    if (!card) continue;
+    pushRow(tbankRow(lines[i], lines[i + 2], lines[i + 6], descriptionParts.join(" "), card, rows.length));
+    i = j;
+  }
+
+  const compact = lines.join("");
+  const rowRegex = /(\d{2}\.\d{2}\.\d{4})(\d{2}:\d{2})(\d{2}\.\d{2}\.\d{4})(\d{2}:\d{2})([+-]\d[\d\s]*[,.]\d{2})\s*₽([+-]\d[\d\s]*[,.]\d{2})\s*₽(.+?)(\d{4}|—)(?=\d{2}\.\d{2}\.\d{4}\d{2}:\d{2}|[₽\d\s,.]*(?:Пополнения:|Расходы:|С уважением)|АО «ТБанк»|Дата и времяоперации|$)/g;
+  let match;
+  while ((match = rowRegex.exec(compact))) {
+    pushRow(tbankRow(match[1], match[3], match[6], match[7], match[8], rows.length));
+  }
   return rows;
 }
 
@@ -1560,14 +1598,18 @@ document.addEventListener("click", (event) => {
   const nav = event.target.closest("[data-view]");
   const jump = event.target.closest("[data-view-jump]");
   const row = event.target.closest("[data-row-id]");
+  const drill = event.target.closest("[data-drill-kind]");
   if (nav) setView(nav.dataset.view);
   if (jump) setView(jump.dataset.viewJump);
-  if (row) showOperationDetails(row.dataset.rowId);
+  if (drill) openDrilldown(drill.dataset.drillKind, drill.dataset.drillValue);
+  else if (row) showOperationDetails(row.dataset.rowId);
   if (event.target.closest("[data-close]")) event.target.closest("dialog")?.close();
 });
 
 document.addEventListener("keydown", (event) => {
   const row = event.target.closest?.("[data-row-id]");
+  const drill = event.target.closest?.("[data-drill-kind]");
+  if (drill && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); openDrilldown(drill.dataset.drillKind, drill.dataset.drillValue); return; }
   if (row && (event.key === "Enter" || event.key === " ")) {
     event.preventDefault();
     showOperationDetails(row.dataset.rowId);
@@ -1581,6 +1623,8 @@ byId("searchInput")?.addEventListener("input", () => {
 ["accountFilter", "categoryFilter", "typeFilter"].forEach((id) => byId(id)?.addEventListener("input", renderTransactions));
 ["accountFilter", "categoryFilter", "typeFilter"].forEach((id) => byId(id)?.addEventListener("change", renderTransactions));
 byId("reportPeriod")?.addEventListener("change", renderReports);
+byId("drillPeriod")?.addEventListener("change", refreshDrilldown);
+byId("drillSort")?.addEventListener("change", refreshDrilldown);
 byId("clearFilters").addEventListener("click", () => {
   byId("searchInput").value = "";
   byId("accountFilter").value = "all";
