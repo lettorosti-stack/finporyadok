@@ -1075,7 +1075,7 @@ async function inflatePdfStream(bytes) {
   return "";
 }
 
-async function extractPdfText(file) {
+async function extractPdfTextLegacy(file) {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
   const raw = new TextDecoder("windows-1252").decode(bytes);
@@ -1100,6 +1100,84 @@ async function extractPdfText(file) {
     ...streams.flatMap((stream) => [extractPdfTextOperatorsWithCMap(stream, cmap), extractPdfTextOperators(stream)])
   ];
   return parts.join("\n").replace(/\u0000/g, "").replace(/\u00a0/g, " ");
+}
+
+async function loadPdfJs() {
+  if (window.pdfjsLib?.getDocument) return window.pdfjsLib;
+
+  const existing = document.querySelector('script[data-finporyadok-pdfjs="1"]');
+  if (existing) {
+    await new Promise((resolve, reject) => {
+      if (window.pdfjsLib?.getDocument) return resolve();
+      existing.addEventListener("load", resolve, { once: true });
+      existing.addEventListener("error", reject, { once: true });
+    });
+    return window.pdfjsLib;
+  }
+
+  await new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+    script.async = true;
+    script.dataset.finporyadokPdfjs = "1";
+    script.onload = resolve;
+    script.onerror = () => reject(new Error("Не удалось загрузить модуль PDF.js"));
+    document.head.append(script);
+  });
+
+  if (!window.pdfjsLib?.getDocument) throw new Error("PDF.js не инициализирован");
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  return window.pdfjsLib;
+}
+
+async function extractPdfTextWithPdfJs(file) {
+  const pdfjs = await loadPdfJs();
+  const data = new Uint8Array(await file.arrayBuffer());
+  const loadingTask = pdfjs.getDocument({ data });
+  const pdf = await loadingTask.promise;
+  const pages = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent({ normalizeWhitespace: true });
+    const items = content.items || [];
+    const lines = [];
+    let currentLine = [];
+    let previousY = null;
+
+    items.forEach((item) => {
+      const value = String(item.str || "").trim();
+      if (!value) return;
+      const y = Array.isArray(item.transform) ? Math.round(item.transform[5]) : null;
+
+      if (previousY !== null && y !== null && Math.abs(y - previousY) > 3 && currentLine.length) {
+        lines.push(currentLine.join(" "));
+        currentLine = [];
+      }
+
+      currentLine.push(value);
+      previousY = y;
+    });
+
+    if (currentLine.length) lines.push(currentLine.join(" "));
+    pages.push(`--- Страница ${pageNumber} из ${pdf.numPages} ---\n${lines.join("\n")}`);
+    page.cleanup?.();
+  }
+
+  pdf.cleanup?.();
+  pdf.destroy?.();
+  return pages.join("\n");
+}
+
+async function extractPdfText(file) {
+  try {
+    const text = await extractPdfTextWithPdfJs(file);
+    if (text.trim()) return text;
+  } catch (error) {
+    console.warn("PDF.js недоступен, используется встроенный резервный разбор PDF:", error);
+  }
+  return extractPdfTextLegacy(file);
 }
 
 function parseMoneyText(value) {
@@ -1259,7 +1337,73 @@ function parseSberStatementText(text, source) {
   return rows;
 }
 
+function parseAlfaStatementText(text, source) {
+  if (!/АЛЬФА-БАНК|Альфа-Банк|Выписка по счету/i.test(text)) return [];
+
+  const accountNumber = (text.match(/Номер\s+счета\s+(\d{12,})/i) || [])[1] || "";
+  const account = accountNumber
+    ? `Альфа-Банк •• ${accountNumber.slice(-4)}`
+    : "Альфа-Банк";
+
+  // В выписках Альфа-Банка первая операция иногда переносится на две строки:
+  // описание заканчивается на одной строке, а сумма находится на следующей.
+  // Поэтому сначала объединяем строки таблицы в единый нормализованный текст.
+  const tableStart = text.search(/Операции\s+по\s+счету/i);
+  const tableText = (tableStart >= 0 ? text.slice(tableStart) : text)
+    .replace(/\u00a0/g, " ")
+    .replace(/\r/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n+/g, " ")
+    .trim();
+
+  const rows = [];
+  const seen = new Set();
+  const operationRegex = /(\d{2}\.\d{2}\.\d{4})\s+([A-ZА-Я0-9-]{6,})\s+(.+?)\s+(-?\s*\d[\d ]*[,.]\d{2})\s*RUR(?=\s+\d{2}\.\d{2}\.\d{4}\s+[A-ZА-Я0-9-]{6,}|\s*$)/gi;
+  let match;
+
+  while ((match = operationRegex.exec(tableText))) {
+    const date = parseBankDate(match[1]);
+    const operationCode = match[2];
+    const description = match[3]
+      .replace(/\s+/g, " ")
+      .replace(/\s*Страница\s+\d+\s+из\s+\d+.*$/i, "")
+      .trim();
+    const absoluteAmount = Number(match[4].replace(/\s/g, "").replace(",", "."));
+    if (!date || !Number.isFinite(absoluteAmount)) continue;
+
+    let amount = Math.abs(absoluteAmount);
+    if (/уменьшение|списание|комисси|выдача|расход|перевод со счета/i.test(description) || /^\s*-/.test(match[4])) {
+      amount = -Math.abs(absoluteAmount);
+    }
+
+    const key = `${date}|${operationCode}|${amount}|${normalizeOperationText(description)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const isInterest = /выплата\s+проц|процент/i.test(description);
+    const isDeposit = /депозит|вклад/i.test(description);
+    rows.push({
+      id: `alfa-pdf-${Date.now()}-${rows.length}`,
+      date,
+      description,
+      amount,
+      balance: 0,
+      category: isInterest ? "Проценты по вкладу" : isDeposit ? "Вклады и накопления" : guessStatementCategory(description, amount),
+      account,
+      payee: "Альфа-Банк",
+      project: "",
+      from: amount < 0 ? account : "",
+      to: amount >= 0 ? account : "",
+      authCode: operationCode
+    });
+  }
+
+  return rows;
+}
+
 function parseStatementText(text, source) {
+  const alfaRows = parseAlfaStatementText(text, source);
+  if (alfaRows.length) return alfaRows;
   const sberRows = parseSberStatementText(text, source);
   if (sberRows.length) return sberRows;
   const tbankRows = parseTbankStatementText(text, source);
