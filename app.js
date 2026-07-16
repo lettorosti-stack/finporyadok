@@ -10,6 +10,8 @@ const state = {
   accounts: savedState.accounts,
   categories: savedState.categories,
   importArchive: savedState.importArchive,
+  financialProducts: Array.isArray(savedState.financialProducts) ? savedState.financialProducts : [],
+  insurancePolicies: Array.isArray(savedState.insurancePolicies) ? savedState.insurancePolicies : [],
   shopping: savedState.shopping.length ? savedState.shopping : [
     { name: "Молоко", qty: "2 л", days: 4, price: 92 },
     { name: "Корм", qty: "3 кг", days: 26, price: 1450 },
@@ -18,11 +20,18 @@ const state = {
 };
 ensureRowIds();
 
+const transactionPage = {
+  limit: 40,
+  step: 40
+};
+
 const views = {
   dashboard: ["Главная", "Сводка по счетам, операциям и обязательствам."],
   transactions: ["Операции", "Поиск, фильтры и проверка импортированных данных."],
   accounts: ["Счета", "Последние остатки и активность по каждому счету."],
-  budgets: ["Бюджеты", "Лимиты строятся из ваших фактических категорий расходов."],
+  budgets: ["Категории", "Отдельные справочники категорий расходов и доходов."],
+  "finance-products": ["Вклады и кредиты", "Проценты, платежи и итоговые суммы по финансовым продуктам."],
+  insurance: ["Страховки", "Полисы семьи, имущества, автомобиля и спорта."],
   alimony: ["Алименты", "Отдельный учет начислений, поступлений и долга."],
   shopping: ["Покупки", "Список, прогноз повторных покупок и история цен."],
   reports: ["Отчеты", "Категории, проекты, доходы, расходы и экспорт."],
@@ -38,14 +47,29 @@ function loadState() {
       accounts: Array.isArray(saved?.accounts) ? saved.accounts : [],
       categories: Array.isArray(saved?.categories) ? saved.categories : [],
       importArchive: Array.isArray(saved?.importArchive) ? saved.importArchive : [],
-      shopping: Array.isArray(saved?.shopping) ? saved.shopping : []
+      shopping: Array.isArray(saved?.shopping) ? saved.shopping : [],
+      financialProducts: Array.isArray(saved?.financialProducts) ? saved.financialProducts : [],
+      insurancePolicies: Array.isArray(saved?.insurancePolicies) ? saved.insurancePolicies : []
     };
   } catch {}
-  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [] };
+  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], financialProducts: [], insurancePolicies: [] };
 }
 
 function saveState() {
-  localStorage.setItem(storeKey, JSON.stringify({ rows: state.rows, accounts: state.accounts, categories: state.categories, importArchive: state.importArchive, shopping: state.shopping }));
+  const savedAt = new Date().toISOString();
+  localStorage.setItem(storeKey, JSON.stringify({
+    schemaVersion: 2,
+    savedAt,
+    rows: state.rows,
+    accounts: state.accounts,
+    categories: state.categories,
+    importArchive: state.importArchive,
+    shopping: state.shopping,
+    financialProducts: state.financialProducts,
+    insurancePolicies: state.insurancePolicies
+  }));
+  localStorage.setItem(`${storeKey}.lastSavedAt`, savedAt);
+  updateDatabaseStatus();
 }
 
 function saveRows() {
@@ -300,8 +324,8 @@ function accountPill(accountName) {
 function categoryMeta(categoryName) {
   const root = String(categoryName || "Без категории").trim() || "Без категории";
   const saved = state.categories.find((item) => normalizeBrandText(item.name) === normalizeBrandText(root));
-  if (saved) return { ...saved, name: root, icon: saved.icon || detectCategoryIcon(root), project: saved.project || "" };
-  return { name: root, icon: detectCategoryIcon(root), project: defaultProjectForCategory(root) };
+  if (saved) return { ...saved, name: root, icon: saved.icon || detectCategoryIcon(root), project: saved.project || "", categoryType: saved.categoryType || "expense" };
+  return { name: root, icon: detectCategoryIcon(root), project: defaultProjectForCategory(root), categoryType: "expense" };
 }
 
 function detectCategoryIcon(categoryName) {
@@ -409,6 +433,155 @@ function summary() {
   return { rows, income, expense, net: income - expense, minDate: dates[0] || "-", maxDate: dates.at(-1) || "-" };
 }
 
+function latestAvailableDate() {
+  const dates = state.rows.map((row) => rowDate(row)).filter(Boolean).sort((a, b) => a - b);
+  return dates.at(-1) || new Date();
+}
+
+function periodRangeByValue(value = "month") {
+  const end = latestAvailableDate();
+  const start = new Date(end);
+  let label = "Месяц";
+  if (value === "week") {
+    start.setDate(end.getDate() - 6);
+    label = "Неделя";
+  } else if (value === "quarter") {
+    start.setMonth(end.getMonth() - 2, 1);
+    label = "Квартал";
+  } else if (value === "half") {
+    start.setMonth(end.getMonth() - 5, 1);
+    label = "Полугодие";
+  } else if (value === "year") {
+    start.setMonth(end.getMonth() - 11, 1);
+    label = "Год";
+  } else if (value === "all") {
+    const min = state.rows.map((row) => rowDate(row)).filter(Boolean).sort((a, b) => a - b)[0];
+    if (min) start.setTime(min.getTime());
+    label = "Всё время";
+  } else {
+    start.setDate(1);
+    label = "Месяц";
+  }
+  start.setHours(0,0,0,0);
+  end.setHours(23,59,59,999);
+  return { start, end, label };
+}
+
+function rowsInNamedPeriod(value = "month") {
+  const range = periodRangeByValue(value);
+  const rows = state.rows.filter((row) => {
+    const date = rowDate(row);
+    return date && date >= range.start && date <= range.end;
+  });
+  return { ...range, rows };
+}
+
+function formatPeriodCompact(start, end) {
+  return `${formatPeriodDate(start)} - ${formatPeriodDate(end)}`;
+}
+
+function averageExpense(rows) {
+  const expenses = rows.filter((row) => row.amount < 0 && typeOf(row) !== 'transfer');
+  if (!expenses.length) return 0;
+  const total = expenses.reduce((sum, row) => sum + Math.abs(Number(row.amount) || 0), 0);
+  return total / expenses.length;
+}
+
+function buildMiniTrend(rows, range) {
+  const target = byId('dashboardTrend');
+  if (!target) return;
+  const bars = buildExpenseHistogram(rows, range);
+  target.innerHTML = bars || `<div class="empty-state compact-empty"><strong>Нет данных</strong><p>Выберите другой период.</p></div>`;
+}
+
+function insuranceSubjectKey(policy) {
+  return `${policy.subjectType || ''}|${normalizeBrandText(policy.subjectName || '')}`;
+}
+
+function hasInsuranceRenewal(policy) {
+  const currentStart = new Date(`${policy.startDate}T00:00:00`).getTime();
+  return state.insurancePolicies.some((candidate) => {
+    if (candidate.id === policy.id) return false;
+    if (insuranceSubjectKey(candidate) !== insuranceSubjectKey(policy)) return false;
+    const candidateStart = new Date(`${candidate.startDate}T00:00:00`).getTime();
+    return candidateStart > currentStart;
+  });
+}
+
+function insuranceReminderPolicies() {
+  const today = latestAvailableDate();
+  today.setHours(0,0,0,0);
+  return state.insurancePolicies
+    .filter((policy) => !hasInsuranceRenewal(policy))
+    .map((policy) => {
+      const end = new Date(`${policy.endDate}T00:00:00`);
+      const daysLeft = Math.ceil((end - today) / 86400000);
+      return { ...policy, daysLeft };
+    })
+    .filter((policy) => policy.daysLeft <= 7)
+    .sort((a, b) => a.daysLeft - b.daysLeft);
+}
+
+function insuranceReminderCard(policy) {
+  const status = policy.daysLeft < 0
+    ? `Полис истёк ${Math.abs(policy.daysLeft)} дн. назад`
+    : policy.daysLeft === 0
+      ? 'Полис заканчивается сегодня'
+      : `До окончания ${policy.daysLeft} дн.`;
+  return `<article class="alert-card ${policy.daysLeft < 0 ? 'alert-card--danger' : 'alert-card--warning'}">
+    <div class="alert-card-copy">
+      <strong>${escapeHtml(policy.name)}</strong>
+      <small>${escapeHtml(policy.subjectName)} • ${escapeHtml(policy.project || insuranceProjectMap[policy.subjectType] || 'Прочее')}</small>
+      <p>${escapeHtml(status)}. Уведомление исчезнет только после продления или оформления нового полиса на этот же объект.</p>
+    </div>
+    <div class="alert-card-side">
+      <span>${formatTransactionDate(policy.endDate)}</span>
+      <button class="ghost alert-open-insurance" data-policy-id="${escapeHtml(policy.id)}" type="button">Открыть</button>
+    </div>
+  </article>`;
+}
+
+function renderInsuranceAlerts() {
+  const target = byId('insuranceAlerts');
+  const countNode = byId('insuranceAlertCount');
+  if (!target || !countNode) return;
+  const items = insuranceReminderPolicies();
+  countNode.textContent = items.length;
+  target.innerHTML = items.length
+    ? items.map(insuranceReminderCard).join('')
+    : `<article class="empty-state"><strong>Всё спокойно</strong><p>На ближайшие 7 дней нет страховок, которые заканчиваются без продления.</p></article>`;
+}
+
+function workExpenseRows() {
+  return state.rows
+    .filter((row) => row.workExpense && row.amount < 0 && typeOf(row) !== 'transfer')
+    .sort((a, b) => `${b.date} ${b.time || ''}`.localeCompare(`${a.date} ${a.time || ''}`));
+}
+
+function renderWorkReimbursement() {
+  const rows = workExpenseRows();
+  const total = rows.reduce((sum, row) => sum + Math.abs(Number(row.amount) || 0), 0);
+  if (byId('workReimbursementTotal')) byId('workReimbursementTotal').textContent = money(total);
+  const target = byId('workReimbursementPreview');
+  if (!target) return;
+  target.innerHTML = rows.length
+    ? rows.slice(0, 4).map((row) => `<article class="reimbursement-row" data-row-id="${escapeHtml(row.id)}" tabindex="0"><div><strong>${escapeHtml(row.description || row.payee || 'Рабочая покупка')}</strong><small>${escapeHtml(formatTransactionDate(row.date))} • ${escapeHtml(row.account || 'Без счёта')} • ${escapeHtml(categoryRoot(row))}</small></div><b>${money(Math.abs(Number(row.amount) || 0))}</b></article>`).join('')
+    : `<article class="empty-state"><strong>Рабочих расходов нет</strong><p>Отметьте галочку в покупке или кассовом чеке.</p></article>`;
+}
+
+function appNotificationCount() {
+  return insuranceReminderPolicies().length + workExpenseRows().length;
+}
+
+function renderNotificationCenterBadge() {
+  const badge = byId('notificationBadge');
+  if (!badge) return;
+  const count = appNotificationCount();
+  badge.textContent = count;
+  badge.hidden = count === 0;
+  byId('notificationCenterBtn')?.classList.toggle('has-notifications', count > 0);
+}
+
 function render() {
   renderMeta();
   renderFilters();
@@ -416,6 +589,11 @@ function render() {
   renderTransactions();
   renderAccounts();
   renderBudgets();
+  renderFinanceProducts();
+  renderInsurance();
+  renderInsuranceAlerts();
+  renderWorkReimbursement();
+  renderNotificationCenterBadge();
   renderAlimony();
   renderShopping();
   renderReports();
@@ -430,22 +608,38 @@ function renderMeta() {
 }
 
 function renderDashboard() {
-  const s = summary();
-  byId("metricCount").textContent = s.rows.length.toLocaleString("ru-RU");
-  byId("metricPeriod").textContent = `${s.minDate} - ${s.maxDate}`;
-  byId("metricIncome").textContent = money(s.income);
-  byId("metricExpense").textContent = money(s.expense);
-  byId("metricNet").textContent = money(s.net);
-  byId("metricNet").className = s.net >= 0 ? "good" : "bad";
+  const selected = byId("dashboardPeriod")?.value || "month";
+  const range = rowsInNamedPeriod(selected);
+  const rows = range.rows;
+  const dates = rows.map((row) => row.date).sort();
+  const income = rows.filter((row) => row.amount > 0 && typeOf(row) !== 'transfer').reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const expense = rows.filter((row) => row.amount < 0 && typeOf(row) !== 'transfer').reduce((sum, row) => sum + Math.abs(Number(row.amount || 0)), 0);
+  const net = income - expense;
+  byId("metricCount").textContent = rows.length.toLocaleString("ru-RU");
+  byId("metricPeriod").textContent = `${range.label}: ${formatPeriodCompact(range.start, range.end)}`;
+  byId("metricIncome").textContent = money(income);
+  byId("metricExpense").textContent = money(expense);
+  byId("metricNet").textContent = money(net);
+  byId("metricNet").className = net >= 0 ? "good" : "bad";
+  if (byId("metricIncomeShare")) byId("metricIncomeShare").textContent = rows.length ? `${rows.filter((row) => row.amount > 0 && typeOf(row) !== 'transfer').length} поступлений` : 'Нет поступлений';
+  if (byId("metricExpenseShare")) byId("metricExpenseShare").textContent = rows.length ? `${rows.filter((row) => row.amount < 0 && typeOf(row) !== 'transfer').length} расходов` : 'Нет расходов';
+  if (byId("metricAverage")) byId("metricAverage").textContent = `${money(averageExpense(rows))} средний чек`;
 
-  const latest = [...state.rows].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
-  byId("latestRows").innerHTML = latest.map(rowTemplate).join("");
+  const latest = [...rows].sort((a, b) => `${b.date} ${b.time || ''}`.localeCompare(`${a.date} ${a.time || ''}`)).slice(0, 12);
+  byId("latestRows").innerHTML = latest.length ? latest.map(rowTemplate).join("") : `<tr><td colspan="6">Нет операций за выбранный период</td></tr>`;
 
-  const accounts = accountSummaries().slice(0, 6);
-  byId("accountSummary").innerHTML = accounts.map((item) => accountSummaryRow(item.name, `${item.count} операций`, money(item.balance))).join("");
+  const accountTotals = summarizeRows(rows, (row) => row.account || row.from || "Без счёта", (row) => typeOf(row) !== 'transfer');
+  byId("accountSummary").innerHTML = accountTotals.slice(0, 6).length
+    ? accountTotals.slice(0, 6).map((item) => accountSummaryRow(item.name, `${item.count} операций`, money(item.total))).join("")
+    : `<article class="empty-state"><strong>Нет счетов</strong><p>За выбранный период движения не найдены.</p></article>`;
 
-  const cats = topBy(state.rows, categoryRoot, (row) => row.amount < 0).slice(0, 6);
-  byId("categorySummary").innerHTML = cats.map((item) => progressRow(item.name, item.count, item.total, cats[0]?.total || 1)).join("");
+  const cats = topBy(rows, categoryRoot, (row) => row.amount < 0).slice(0, 6);
+  byId("categorySummary").innerHTML = cats.length
+    ? cats.map((item) => progressRow(item.name, item.count, item.total, cats[0]?.total || 1)).join("")
+    : `<article class="empty-state"><strong>Нет категорий</strong><p>За выбранный период расходов пока нет.</p></article>`;
+
+  buildMiniTrend(rows, range);
+  renderInsuranceAlerts();
 }
 
 function rowTemplate(row) {
@@ -525,29 +719,55 @@ function filteredRows() {
   const account = byId("accountFilter").value;
   const category = byId("categoryFilter").value;
   const type = byId("typeFilter").value;
+  const workExpense = byId("workExpenseFilter")?.value || "all";
   return state.rows.filter((row) => {
     const hay = `${row.description} ${row.category} ${row.account} ${row.project} ${row.payee}`.toLowerCase();
     return (!query || hay.includes(query))
       && (account === "all" || row.account === account)
       && (category === "all" || categoryRoot(row) === category)
-      && (type === "all" || typeOf(row) === type);
+      && (type === "all" || typeOf(row) === type)
+      && (workExpense === "all" || (workExpense === "work" ? Boolean(row.workExpense) : !row.workExpense));
   });
 }
 
 function transactionCardTemplate(row) {
   const kind = typeOf(row);
-  const amountValue = kind === "transfer" ? Math.abs(Number(row.transferAmount || 0)) : Number(row.amount || 0);
-  const amountClass = kind === "transfer" ? "transfer-amount" : amountValue >= 0 ? "good" : "bad";
+  const amountValue = kind === "transfer"
+    ? Math.abs(Number(row.transferAmount || 0))
+    : Number(row.amount || 0);
+  const amountClass = kind === "transfer"
+    ? "transfer-amount"
+    : amountValue >= 0 ? "good" : "bad";
   const typeLabel = kind === "transfer" ? "Перевод" : kind === "income" ? "Доход" : "Расход";
   const accountText = kind === "transfer"
     ? `${row.from || row.account || "Счёт"} → ${row.to || "Счёт"}`
     : row.account || "Без счёта";
-  return `<article class="transaction-card" data-row-id="${escapeHtml(row.id)}" tabindex="0">
-    <div class="transaction-card-icon">${categoryIcon(row.category)}</div>
+  const categoryName = categoryRoot(row);
+  const iconId = detectCategoryIcon(categoryName);
+  const icon = categoryIcons[iconId] || categoryIcons.default;
+
+  return `<article class="transaction-card transaction-card--light" data-row-id="${escapeHtml(row.id)}" tabindex="0">
+    <div class="transaction-card-icon">
+      <span class="category-icon" style="--cat-bg:${icon.tone}" aria-hidden="true">
+        <svg viewBox="0 0 24 24">${icon.svg}</svg>
+      </span>
+    </div>
     <div class="transaction-card-main">
-      <div class="transaction-card-top"><strong>${escapeHtml(row.description || row.payee || "Операция")}</strong><b class="transaction-card-amount ${amountClass}">${kind === "transfer" ? money(amountValue) : money(amountValue)}</b></div>
-      <div class="transaction-card-meta"><span>${escapeHtml(formatTransactionDate(row.date))}</span><span>${escapeHtml(typeLabel)}</span><span>${escapeHtml(accountText)}</span></div>
-      <div class="transaction-card-tags">${categoryPill(row.category)}${row.payee ? `<span class="soft-pill">${escapeHtml(row.payee)}</span>` : ""}${row.project ? projectPill(row.project) : ""}</div>
+      <div class="transaction-card-top">
+        <strong>${escapeHtml(row.description || row.payee || "Операция")}</strong>
+        <b class="transaction-card-amount ${amountClass}">${money(amountValue)}</b>
+      </div>
+      <div class="transaction-card-meta">
+        <span>${escapeHtml(formatTransactionDate(row.date))}</span>
+        <span>${escapeHtml(typeLabel)}</span>
+        <span>${escapeHtml(accountText)}</span>
+      </div>
+      <div class="transaction-card-tags transaction-card-tags--text">
+        <span class="soft-pill">${escapeHtml(categoryName)}</span>
+        ${row.workExpense ? `<span class="soft-pill work-expense-pill">Работа · к возмещению</span>` : ""}
+        ${row.payee ? `<span class="soft-pill">${escapeHtml(row.payee)}</span>` : ""}
+        ${row.project ? `<span class="soft-pill">${escapeHtml(row.project)}</span>` : ""}
+      </div>
     </div>
     <span class="transaction-chevron">›</span>
   </article>`;
@@ -559,15 +779,66 @@ function formatTransactionDate(value) {
   return date.toLocaleDateString("ru-RU", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function renderTransactions() {
+function renderTransactions(options = {}) {
   const rows = filteredRows().sort((a, b) => `${b.date} ${b.time || ""}`.localeCompare(`${a.date} ${a.time || ""}`));
+  if (options.reset) transactionPage.limit = transactionPage.step;
+
+  const income = rows.filter((row) => row.amount > 0 && typeOf(row) !== 'transfer').reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const expense = rows.filter((row) => row.amount < 0 && typeOf(row) !== 'transfer').reduce((sum, row) => sum + Math.abs(Number(row.amount || 0)), 0);
+  const net = income - expense;
+  if (byId('txMetricIncome')) byId('txMetricIncome').textContent = money(income);
+  if (byId('txMetricExpense')) byId('txMetricExpense').textContent = money(expense);
+  if (byId('txMetricNet')) {
+    byId('txMetricNet').textContent = money(net);
+    byId('txMetricNet').className = net >= 0 ? 'good' : 'bad';
+  }
+  if (byId('txMetricCount')) byId('txMetricCount').textContent = `${rows.length.toLocaleString('ru-RU')} операций`;
+  const workRows = rows.filter((row) => row.workExpense && row.amount < 0 && typeOf(row) !== 'transfer');
+  const workTotal = workRows.reduce((sum, row) => sum + Math.abs(Number(row.amount) || 0), 0);
+  if (byId('txMetricWork')) byId('txMetricWork').textContent = money(workTotal);
+  if (byId('txMetricWorkCount')) byId('txMetricWorkCount').textContent = `${workRows.length.toLocaleString('ru-RU')} операций`;
+
+  const visible = rows.slice(0, transactionPage.limit);
   const target = byId("transactionRows");
-  if (target) target.innerHTML = rows.length
-    ? rows.map(transactionCardTemplate).join("")
-    : `<div class="empty-state"><strong>Операции не найдены</strong><p>Сбросьте фильтры или измените запрос.</p></div>`;
-  if (byId("transactionsVisibleCount")) byId("transactionsVisibleCount").textContent = `${rows.length.toLocaleString("ru-RU")} операций`;
+
+  if (target) {
+    if (!visible.length) {
+      target.innerHTML = `<div class="empty-state"><strong>Операции не найдены</strong><p>Сбросьте фильтры или измените запрос.</p></div>`;
+    } else {
+      const groups = [];
+      visible.forEach((row) => {
+        const key = row.date || 'Без даты';
+        let group = groups.find((item) => item.key === key);
+        if (!group) {
+          group = { key, rows: [] };
+          groups.push(group);
+        }
+        group.rows.push(row);
+      });
+      target.innerHTML = groups.map((group) => `<section class="transaction-group"><header class="transaction-group-head"><strong>${escapeHtml(formatTransactionDate(group.key))}</strong><small>${group.rows.length} операций</small></header>${group.rows.map(transactionCardTemplate).join('')}</section>`).join('');
+    }
+  }
+
+  if (byId("transactionsVisibleCount")) {
+    byId("transactionsVisibleCount").textContent =
+      rows.length > visible.length
+        ? `Показано ${visible.length} из ${rows.length.toLocaleString("ru-RU")}`
+        : `${rows.length.toLocaleString("ru-RU")} операций`;
+  }
+
+  const moreButton = byId("showAllTransactions");
+  if (moreButton) {
+    const remaining = Math.max(0, rows.length - visible.length);
+    moreButton.hidden = remaining === 0;
+    moreButton.textContent = remaining
+      ? `Показать ещё ${Math.min(transactionPage.step, remaining)}`
+      : "Все операции показаны";
+  }
+
   if (document.querySelector("#transactions.view.active")) {
-    byId("pageSubtitle").textContent = `Показаны все ${rows.length.toLocaleString("ru-RU")} операций. Нажмите на карточку, чтобы открыть детали.`;
+    byId("pageSubtitle").textContent = rows.length
+      ? `Найдено ${rows.length.toLocaleString("ru-RU")} операций. Доходы ${money(income)}, расходы ${money(expense)}.`
+      : "Операции не найдены по текущим фильтрам.";
   }
 }
 
@@ -576,13 +847,486 @@ function renderAccounts() {
   byId("accountCards").innerHTML = accounts.map((item) => `<article class="card account-card drill-card" data-drill-kind="account" data-drill-value="${escapeHtml(item.name)}" tabindex="0"><div class="account-card-title">${bankIcon(item.name)}<h3>${escapeHtml(item.name)}</h3></div><p>${escapeHtml(item.type || brandForAccount(item.name)?.name || "Счет")} • ${item.count} операций • последнее движение ${escapeHtml(item.latest)}</p><strong>${money(item.balance)}</strong><span class="open-hint">Открыть операции →</span></article>`).join("");
 }
 
+function categoryNamesByType(categoryType) {
+  const set = new Set();
+  state.categories
+    .filter((item) => (item.categoryType || "expense") === categoryType)
+    .forEach((item) => set.add(item.name));
+
+  state.rows.forEach((row) => {
+    const kind = typeOf(row);
+    if ((categoryType === "income" && kind === "income") ||
+        (categoryType === "expense" && kind === "expense")) {
+      const name = categoryRoot(row);
+      if (name && name !== "Без категории") set.add(name);
+    }
+  });
+  return [...set].sort((a, b) => a.localeCompare(b, "ru"));
+}
+
+function categoryCardHtml(name, categoryType) {
+  const rows = state.rows.filter((row) =>
+    categoryRoot(row) === name &&
+    (categoryType === "income" ? typeOf(row) === "income" : typeOf(row) === "expense")
+  );
+  const total = rows.reduce((sum, row) => sum + Math.abs(Number(row.amount) || 0), 0);
+  const project = categoryMeta(name).project;
+  const latest = rows.map((row) => row.date).sort().at(-1) || "";
+  const iconId = detectCategoryIcon(name);
+  const icon = categoryIcons[iconId] || categoryIcons.default;
+  return `<article class="card category-card drill-card category-card--${categoryType}" data-drill-kind="category" data-drill-value="${escapeHtml(name)}" tabindex="0">
+    <div class="category-card-title">
+      <span class="category-icon" style="--cat-bg:${icon.tone}" aria-hidden="true"><svg viewBox="0 0 24 24">${icon.svg}</svg></span>
+      <div><h3>${escapeHtml(name)}</h3><p>${project ? `Проект ${escapeHtml(project)}` : categoryType === 'income' ? 'Доходная категория' : 'Расходная категория'}</p></div>
+    </div>
+    <strong>${money(total)}</strong>
+    <div class="category-card-grid">
+      <div><span>Операций</span><b>${rows.length}</b></div>
+      <div><span>Последняя</span><b>${latest ? escapeHtml(formatTransactionDate(latest)) : '—'}</b></div>
+    </div>
+    <span class="category-type-badge">${categoryType === "income" ? "Доход" : "Расход"}</span>
+    <span class="open-hint">Открыть операции →</span>
+  </article>`;
+}
+
 function renderBudgets() {
-  const cats = categorySummaries((row) => row.amount < 0).slice(0, 12);
-  byId("budgetCards").innerHTML = cats.map((item) => {
-    const limit = Math.ceil((item.total / Math.max(1, item.count)) * 8 / 1000) * 1000;
-    const pct = Math.min(100, Math.round((item.total / Math.max(item.total, limit * item.count / 8)) * 100));
-    return `<article class="card category-card drill-card" data-drill-kind="category" data-drill-value="${escapeHtml(item.name)}" tabindex="0"><div class="category-card-title">${categoryIcon(item.name)}<h3>${escapeHtml(item.name)}</h3></div><p>${item.count} операций${item.project ? ` • проект ${escapeHtml(item.project)}` : ""}</p><div class="bar"><i style="width:${pct}%"></i></div><strong>${money(item.total)}</strong><span class="open-hint">Показать затраты →</span></article>`;
-  }).join("");
+  const expenseNames = categoryNamesByType("expense");
+  const incomeNames = categoryNamesByType("income");
+
+  byId("budgetCards").innerHTML = expenseNames.length
+    ? expenseNames.map((name) => categoryCardHtml(name, "expense")).join("")
+    : `<article class="empty-state"><strong>Нет категорий расходов</strong><p>Добавьте первую категорию.</p></article>`;
+
+  byId("incomeCategoryCards").innerHTML = incomeNames.length
+    ? incomeNames.map((name) => categoryCardHtml(name, "income")).join("")
+    : `<article class="empty-state"><strong>Нет категорий доходов</strong><p>Добавьте зарплату, алименты, пособия или другой источник.</p></article>`;
+
+  const expenseTotal = state.rows.filter((row) => typeOf(row) === 'expense').reduce((sum, row) => sum + Math.abs(Number(row.amount) || 0), 0);
+  const incomeTotal = state.rows.filter((row) => typeOf(row) === 'income').reduce((sum, row) => sum + Math.abs(Number(row.amount) || 0), 0);
+
+  if (byId("expenseCategoryCount")) byId("expenseCategoryCount").textContent = expenseNames.length;
+  if (byId("incomeCategoryCount")) byId("incomeCategoryCount").textContent = incomeNames.length;
+  if (byId("categoryExpenseTotal")) byId("categoryExpenseTotal").textContent = money(expenseTotal);
+  if (byId("categoryIncomeTotal")) byId("categoryIncomeTotal").textContent = money(incomeTotal);
+  if (byId("categoryExpenseMeta")) byId("categoryExpenseMeta").textContent = `${expenseNames.length} категорий`;
+  if (byId("categoryIncomeMeta")) byId("categoryIncomeMeta").textContent = `${incomeNames.length} категорий`;
+  if (byId("categoryCombinedCount")) byId("categoryCombinedCount").textContent = (expenseNames.length + incomeNames.length).toLocaleString('ru-RU');
+}
+
+function ratePerMonth(product) {
+  const rate = Math.max(0, Number(product.rate) || 0) / 100;
+  if (product.rateMode === "monthly") return rate;
+  if (product.rateMode === "annual") return rate / 12;
+  return 0;
+}
+
+function calculateLoan(product) {
+  const principal = Math.max(0, Number(product.principal) || 0);
+  const months = Math.max(1, Number(product.termMonths) || 1);
+  const rate = Math.max(0, Number(product.rate) || 0) / 100;
+
+  if (product.rateMode === "period") {
+    const total = principal * (1 + rate);
+    return { monthlyPayment: total / months, total, interest: total - principal };
+  }
+
+  const monthlyRate = ratePerMonth(product);
+  if (product.paymentType === "differentiated") {
+    const first = principal / months + principal * monthlyRate;
+    const last = principal / months + (principal / months) * monthlyRate;
+    const interest = monthlyRate ? principal * monthlyRate * (months + 1) / 2 : 0;
+    return { monthlyPayment: first, lastPayment: last, total: principal + interest, interest };
+  }
+
+  const payment = monthlyRate
+    ? principal * monthlyRate * Math.pow(1 + monthlyRate, months) / (Math.pow(1 + monthlyRate, months) - 1)
+    : principal / months;
+  const total = payment * months;
+  return { monthlyPayment: payment, total, interest: total - principal };
+}
+
+function calculateDeposit(product) {
+  const principal = Math.max(0, Number(product.principal) || 0);
+  const months = Math.max(1, Number(product.termMonths) || 1);
+  const rate = Math.max(0, Number(product.rate) || 0) / 100;
+  let maturity = principal;
+
+  if (product.rateMode === "period") {
+    maturity = principal * (1 + rate);
+  } else if (product.rateMode === "monthly") {
+    maturity = product.capitalization === "monthly"
+      ? principal * Math.pow(1 + rate, months)
+      : principal * (1 + rate * months);
+  } else {
+    maturity = product.capitalization === "monthly"
+      ? principal * Math.pow(1 + rate / 12, months)
+      : principal * (1 + rate * months / 12);
+  }
+  return { maturity, interest: maturity - principal };
+}
+
+function addMonthsSafe(dateText, months, paymentDay = null) {
+  const source = new Date(`${dateText || new Date().toISOString().slice(0, 10)}T00:00:00`);
+  const target = new Date(source.getFullYear(), source.getMonth() + months, 1);
+  const day = Math.min(Number(paymentDay) || source.getDate(), 28);
+  target.setDate(day);
+  return target.toISOString().slice(0, 10);
+}
+
+function plannedLoanPaymentsList(monthLimit = 12) {
+  const today = new Date();
+  const todayText = today.toISOString().slice(0, 10);
+  const result = [];
+
+  state.financialProducts
+    .filter((item) => item.type === "loan")
+    .forEach((product) => {
+      const calc = calculateLoan(product);
+      const months = Math.max(1, Number(product.termMonths) || 1);
+      for (let index = 1; index <= months; index += 1) {
+        const date = addMonthsSafe(product.startDate, index, product.paymentDay);
+        if (date < todayText) continue;
+        const amount = product.paymentType === "differentiated" && product.rateMode !== "period"
+          ? Math.max(
+              Number(product.principal) / months +
+              Math.max(0, Number(product.principal) - Number(product.principal) / months * (index - 1)) * ratePerMonth(product),
+              0
+            )
+          : calc.monthlyPayment;
+        result.push({
+          id: `${product.id}-payment-${index}`,
+          productId: product.id,
+          name: product.name,
+          bank: product.bank,
+          date,
+          amount,
+          category: product.expenseCategory || "Кредиты",
+          planned: true
+        });
+      }
+    });
+
+  return result.sort((a, b) => a.date.localeCompare(b.date)).slice(0, monthLimit * 8);
+}
+
+function financeProductCard(product) {
+  const isLoan = product.type === "loan";
+  const calc = isLoan ? calculateLoan(product) : calculateDeposit(product);
+  const finishDate = addMonthsSafe(product.startDate, Number(product.termMonths) || 1);
+  return `<article class="finance-product-card">
+    <div class="finance-product-card-head">
+      <div><span class="finance-product-type ${isLoan ? "loan" : "deposit"}">${isLoan ? "Кредит" : "Вклад"}</span>
+      <h3>${escapeHtml(product.name)}</h3>
+      <p>${escapeHtml(product.bank || "Банк не указан")} • до ${formatTransactionDate(finishDate)}</p></div>
+      <button class="icon-button delete-finance-product" data-product-id="${escapeHtml(product.id)}" title="Удалить">×</button>
+    </div>
+    <div class="finance-product-values">
+      <div><span>Сумма</span><strong>${money(product.principal)}</strong></div>
+      <div><span>Ставка</span><strong>${Number(product.rate || 0).toLocaleString("ru-RU")}% ${product.rateMode === "annual" ? "годовых" : product.rateMode === "monthly" ? "в месяц" : "за срок"}</strong></div>
+      ${isLoan
+        ? `<div><span>Платёж в месяц</span><strong>${money(calc.monthlyPayment)}</strong></div>
+           <div><span>Переплата</span><strong>${money(calc.interest)}</strong></div>`
+        : `<div><span>В конце срока</span><strong>${money(calc.maturity)}</strong></div>
+           <div><span>Доход</span><strong>${money(calc.interest)}</strong></div>`}
+    </div>
+  </article>`;
+}
+
+function renderFinanceProducts() {
+  const loans = state.financialProducts.filter((item) => item.type === "loan");
+  const deposits = state.financialProducts.filter((item) => item.type === "deposit");
+  const plan = plannedLoanPaymentsList(12);
+
+  byId("loanCards").innerHTML = loans.length
+    ? loans.map(financeProductCard).join("")
+    : `<article class="empty-state"><strong>Кредитов нет</strong><p>Добавьте кредит, чтобы рассчитать платёж и план расходов.</p></article>`;
+  byId("depositCards").innerHTML = deposits.length
+    ? deposits.map(financeProductCard).join("")
+    : `<article class="empty-state"><strong>Вкладов нет</strong><p>Добавьте вклад, чтобы увидеть итоговую сумму и доход.</p></article>`;
+
+  byId("plannedLoanPayments").innerHTML = plan.length
+    ? plan.map((item) => `<article class="planned-payment-row">
+        <div><strong>${escapeHtml(item.name)}</strong><small>${formatTransactionDate(item.date)} • ${escapeHtml(item.bank || "Банк")} • ${escapeHtml(item.category)}</small></div>
+        <b>${money(item.amount)}</b>
+      </article>`).join("")
+    : `<article class="empty-state"><strong>План пуст</strong><p>После добавления кредита здесь появятся будущие ежемесячные платежи.</p></article>`;
+
+  const loanPrincipal = loans.reduce((sum, item) => sum + Number(item.principal || 0), 0);
+  const monthly = loans.reduce((sum, item) => sum + calculateLoan(item).monthlyPayment, 0);
+  const depositPrincipal = deposits.reduce((sum, item) => sum + Number(item.principal || 0), 0);
+  const maturity = deposits.reduce((sum, item) => sum + calculateDeposit(item).maturity, 0);
+  const nextMonthTotal = plan.filter((item) => {
+    const date = new Date(`${item.date}T00:00:00`);
+    const now = new Date();
+    return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+  }).reduce((sum, item) => sum + item.amount, 0);
+
+  byId("loanBalanceTotal").textContent = money(loanPrincipal);
+  byId("loanMonthlyTotal").textContent = `${money(monthly)} в месяц`;
+  byId("depositPrincipalTotal").textContent = money(depositPrincipal);
+  byId("depositMaturityTotal").textContent = `${money(maturity)} к получению`;
+  byId("plannedPaymentsTotal").textContent = money(nextMonthTotal || plan.slice(0, loans.length).reduce((sum, item) => sum + item.amount, 0));
+}
+
+function populateFinanceCategorySelects() {
+  const expenses = categoryNamesByType("expense");
+  const incomes = categoryNamesByType("income");
+  byId("financeExpenseCategory").innerHTML = (expenses.length ? expenses : ["Кредиты"]).map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+  byId("financeIncomeCategory").innerHTML = (incomes.length ? incomes : ["Проценты по вкладам"]).map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+}
+
+function toggleFinanceProductFields() {
+  const type = byId("financeProductType").value;
+  document.querySelectorAll(".loan-only").forEach((item) => item.hidden = type !== "loan");
+  document.querySelectorAll(".deposit-only").forEach((item) => item.hidden = type !== "deposit");
+  updateFinanceCalculationPreview();
+}
+
+function currentFinanceFormProduct() {
+  const data = Object.fromEntries(new FormData(byId("financeProductForm")).entries());
+  return {
+    type: data.productType,
+    name: data.name || "Предварительный расчёт",
+    bank: data.bank || "",
+    principal: Number(data.principal) || 0,
+    rate: Number(data.rate) || 0,
+    rateMode: data.rateMode || "annual",
+    termMonths: Number(data.termMonths) || 1,
+    startDate: data.startDate || new Date().toISOString().slice(0, 10),
+    paymentType: data.paymentType || "annuity",
+    paymentDay: Number(data.paymentDay) || 10,
+    capitalization: data.capitalization || "monthly",
+    expenseCategory: data.expenseCategory || "Кредиты",
+    incomeCategory: data.incomeCategory || "Проценты по вкладам"
+  };
+}
+
+function updateFinanceCalculationPreview() {
+  const target = byId("financeCalculationPreview");
+  if (!target) return;
+  const product = currentFinanceFormProduct();
+  if (product.type === "loan") {
+    const calc = calculateLoan(product);
+    target.innerHTML = `<div><span>Ежемесячный платёж</span><strong>${money(calc.monthlyPayment)}</strong></div>
+      ${calc.lastPayment ? `<div><span>Последний платёж</span><strong>${money(calc.lastPayment)}</strong></div>` : ""}
+      <div><span>Всего выплат</span><strong>${money(calc.total)}</strong></div>
+      <div><span>Переплата</span><strong>${money(calc.interest)}</strong></div>`;
+  } else {
+    const calc = calculateDeposit(product);
+    target.innerHTML = `<div><span>Сумма в конце срока</span><strong>${money(calc.maturity)}</strong></div>
+      <div><span>Начисленные проценты</span><strong>${money(calc.interest)}</strong></div>`;
+  }
+}
+
+
+const insuranceProjectMap = {
+  home: "Дом",
+  car: "Авто",
+  gymnastics: "Гимнастика",
+  health: "Здоровье",
+  travel: "Путешествия",
+  life: "Семья",
+  property: "Дом",
+  other: "Прочее"
+};
+
+function insuranceStatus(policy) {
+  const today = new Date();
+  const end = new Date(`${policy.endDate}T23:59:59`);
+  const days = Math.ceil((end - today) / 86400000);
+  if (days < 0) return { key: "expired", label: "Истёк", days };
+  if (days <= 45) return { key: "expiring", label: `Осталось ${days} дн.`, days };
+  return { key: "active", label: "Действует", days };
+}
+
+function insuranceSubjectLabel(type) {
+  return {
+    home: "Дом / квартира",
+    car: "Автомобиль",
+    gymnastics: "Гимнастика / спорт",
+    health: "Здоровье",
+    travel: "Путешествие",
+    life: "Жизнь",
+    property: "Имущество",
+    other: "Другое"
+  }[type] || "Другое";
+}
+
+function insuranceCard(policy) {
+  const status = insuranceStatus(policy);
+  return `<article class="insurance-card insurance-card--${status.key}">
+    <div class="insurance-card-head">
+      <div>
+        <span class="insurance-status ${status.key}">${escapeHtml(status.label)}</span>
+        <h3>${escapeHtml(policy.name)}</h3>
+        <p>${escapeHtml(policy.insurer || "Страховая компания не указана")}${policy.policyNumber ? ` • № ${escapeHtml(policy.policyNumber)}` : ""}</p>
+      </div>
+      <button class="icon-button delete-insurance" data-policy-id="${escapeHtml(policy.id)}" title="Удалить">×</button>
+    </div>
+    <div class="insurance-card-body">
+      <div><span>Застраховано</span><strong>${escapeHtml(policy.subjectName)}</strong><small>${escapeHtml(insuranceSubjectLabel(policy.subjectType))}</small></div>
+      <div><span>Проект</span><strong>${escapeHtml(policy.project || "Не указан")}</strong><small>${escapeHtml(policy.familyMember || "")}</small></div>
+      <div><span>Стоимость</span><strong>${money(policy.cost)}</strong><small>${formatTransactionDate(policy.startDate)} — ${formatTransactionDate(policy.endDate)}</small></div>
+    </div>
+    <div class="insurance-card-actions">
+      ${policy.pdfStored ? `<button class="ghost open-insurance-pdf" data-policy-id="${escapeHtml(policy.id)}" type="button">Открыть PDF</button>` : `<span class="muted">PDF не загружен</span>`}
+      <button class="ghost edit-insurance" data-policy-id="${escapeHtml(policy.id)}" type="button">Редактировать</button>
+    </div>
+  </article>`;
+}
+
+function filteredInsurancePolicies() {
+  const statusFilter = byId("insuranceStatusFilter")?.value || "all";
+  const projectFilter = byId("insuranceProjectFilter")?.value || "all";
+  return state.insurancePolicies.filter((policy) => {
+    const status = insuranceStatus(policy).key;
+    return (statusFilter === "all" || status === statusFilter) &&
+      (projectFilter === "all" || policy.project === projectFilter);
+  });
+}
+
+function renderInsurance() {
+  const policies = filteredInsurancePolicies();
+  const all = state.insurancePolicies;
+  const active = all.filter((item) => insuranceStatus(item).key !== "expired");
+  const expiring = all.filter((item) => insuranceStatus(item).key === "expiring");
+  const projects = [...new Set(all.map((item) => item.project).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru"));
+
+  if (byId("insuranceCards")) {
+    byId("insuranceCards").innerHTML = policies.length
+      ? policies.map(insuranceCard).join("")
+      : `<article class="empty-state"><strong>Страховок нет</strong><p>Добавьте первый полис и прикрепите PDF.</p></article>`;
+  }
+
+  if (byId("activeInsuranceCount")) byId("activeInsuranceCount").textContent = active.length;
+  if (byId("expiringInsuranceCount")) byId("expiringInsuranceCount").textContent = expiring.length;
+  if (byId("insuredObjectsCount")) byId("insuredObjectsCount").textContent = new Set(all.map((item) => item.subjectName).filter(Boolean)).size;
+  if (byId("insuranceTotalCost")) byId("insuranceTotalCost").textContent = `${money(all.reduce((sum, item) => sum + Number(item.cost || 0), 0))} оплачено`;
+
+  const projectSelect = byId("insuranceProjectFilter");
+  if (projectSelect) {
+    const current = projectSelect.value;
+    projectSelect.innerHTML = `<option value="all">Все проекты</option>` +
+      projects.map((project) => `<option value="${escapeHtml(project)}">${escapeHtml(project)}</option>`).join("");
+    if ([...projectSelect.options].some((option) => option.value === current)) projectSelect.value = current;
+  }
+}
+
+function populateInsuranceFormOptions() {
+  const projects = [...new Set([
+    "Дом", "Авто", "Гимнастика", "Здоровье", "Путешествия", "Семья", "Прочее",
+    ...state.rows.map((row) => row.project).filter(Boolean),
+    ...state.categories.map((item) => item.project).filter(Boolean)
+  ])].sort((a, b) => a.localeCompare(b, "ru"));
+
+  byId("insuranceProject").innerHTML = projects.map((project) => `<option value="${escapeHtml(project)}">${escapeHtml(project)}</option>`).join("");
+  const expenseCategories = categoryNamesByType("expense");
+  const insuranceCategories = ["Страхование", ...expenseCategories.filter((name) => normalizeBrandText(name) !== "страхование")];
+  byId("insuranceExpenseCategory").innerHTML = insuranceCategories.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+
+  const accountNames = knownAccountNames();
+  byId("insuranceAccount").innerHTML = `<option value="">Не указан</option>` +
+    accountNames.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+}
+
+function updateInsuranceProjectBySubject() {
+  const type = byId("insuranceSubjectType").value;
+  const project = insuranceProjectMap[type] || "Прочее";
+  if ([...byId("insuranceProject").options].some((option) => option.value === project)) {
+    byId("insuranceProject").value = project;
+  }
+  document.querySelectorAll(".insurance-person-field").forEach((item) => {
+    item.hidden = !["gymnastics", "health", "life", "travel"].includes(type);
+  });
+
+  let note = `Полис будет привязан к проекту «${project}».`;
+  if (type === "gymnastics") note += " Для страховки по гимнастике обязательно выберите ребёнка.";
+  if (byId("insuranceAutoNote")) byId("insuranceAutoNote").textContent = note;
+}
+
+function insurancePdfDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("finporyadok-files", 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains("insurancePdfs")) {
+        db.createObjectStore("insurancePdfs");
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveInsurancePdf(policyId, file) {
+  if (!file) return false;
+  if (file.type && file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+    throw new Error("Для страхового полиса нужен PDF-файл.");
+  }
+  const db = await insurancePdfDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction("insurancePdfs", "readwrite");
+    tx.objectStore("insurancePdfs").put({
+      name: file.name,
+      type: file.type || "application/pdf",
+      size: file.size,
+      updatedAt: new Date().toISOString(),
+      blob: file
+    }, policyId);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+  return true;
+}
+
+async function getInsurancePdf(policyId) {
+  const db = await insurancePdfDb();
+  const result = await new Promise((resolve, reject) => {
+    const tx = db.transaction("insurancePdfs", "readonly");
+    const request = tx.objectStore("insurancePdfs").get(policyId);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+  db.close();
+  return result;
+}
+
+async function deleteInsurancePdf(policyId) {
+  const db = await insurancePdfDb();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction("insurancePdfs", "readwrite");
+    tx.objectStore("insurancePdfs").delete(policyId);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
+function insuranceExpenseExists(policyId) {
+  return state.rows.some((row) => row.insurancePolicyId === policyId);
+}
+
+function addInsuranceExpense(policy) {
+  if (!Number(policy.cost) || insuranceExpenseExists(policy.id)) return;
+  const row = {
+    id: `insurance-expense-${policy.id}`,
+    insurancePolicyId: policy.id,
+    date: policy.purchaseDate || policy.startDate,
+    time: "12:00",
+    description: `Страховка: ${policy.name}`,
+    amount: -Math.abs(Number(policy.cost)),
+    account: policy.account || "",
+    from: policy.account || "",
+    to: "",
+    category: policy.expenseCategory || "Страхование",
+    payee: policy.insurer || "",
+    project: policy.project || "",
+    familyMember: policy.familyMember || "",
+    comment: `Полис ${policy.policyNumber || "без номера"} на ${policy.subjectName}`,
+    importSource: "Страховки"
+  };
+  state.rows.push(row);
 }
 
 function renderAlimony() {
@@ -837,12 +1581,23 @@ function projectOptions() {
   return [...set];
 }
 
-function populateCategorySelect() {
+function populateCategorySelect(categoryType = null) {
   ensureCategoryPicker();
   const select = byId("txCategorySelect");
   if (!select) return;
   const current = select.value;
-  const categories = categorySummaries().map((item) => item.name);
+  const txType = categoryType || byId("txForm")?.elements?.txType?.value || "expense";
+
+  if (txType === "transfer") {
+    select.innerHTML = `<option value="Перевод">Перевод</option>`;
+    select.value = "Перевод";
+    select.disabled = true;
+    updateCategoryPreview();
+    return;
+  }
+
+  select.disabled = false;
+  const categories = categoryNamesByType(txType === "income" ? "income" : "expense");
   select.innerHTML = categories.length
     ? categories.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("")
     : `<option value="Без категории">Без категории</option>`;
@@ -1020,6 +1775,7 @@ function showOperationDetails(id) {
     ["Счет", row.account || "-"],
     ["Контрагент", row.payee || "-"],
     ["Проект", row.project || "-"],
+    ["Расход по работе", row.workExpense ? "Да, для возмещения" : "Нет"],
     ["Счет списания", row.from || "-"],
     ["Счет зачисления", row.to || "-"],
     ["Баланс после операции", money(row.balance)],
@@ -1040,7 +1796,7 @@ function setView(id) {
   document.querySelectorAll(".nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === id));
   byId("pageTitle").textContent = views[id]?.[0] || "ФинПорядок";
   byId("pageSubtitle").textContent = views[id]?.[1] || "";
-  if (id === "transactions") renderTransactions();
+  if (id === "transactions") renderTransactions({ reset: true });
   if (id === "reports") renderReports();
 }
 
@@ -1077,12 +1833,140 @@ function normalizeOperationText(value) {
   return normalizeBrandText(value).replace(/[^a-zа-я0-9]+/g, " ").trim();
 }
 
+
+function knownAccountNames() {
+  const names = new Set();
+  state.rows.forEach((row) => {
+    [row.account, row.from, row.to].forEach((name) => {
+      if (name) names.add(String(name).trim());
+    });
+  });
+  state.accounts.forEach((account) => {
+    if (account?.name) names.add(String(account.name).trim());
+  });
+  return [...names].filter(Boolean);
+}
+
+function detectBankFamily(value) {
+  const text = normalizeBrandText(value || "");
+  if (/т.?банк|тинькофф|tinkoff/.test(text)) return "tbank";
+  if (/сбер|sber/.test(text)) return "sber";
+  if (/альфа|alfa|alpha/.test(text)) return "alfa";
+  if (/\bвтб\b|vtb/.test(text)) return "vtb";
+  if (/райффайзен|raiffeisen/.test(text)) return "raiffeisen";
+  if (/wildberries.?банк|wb.?банк/.test(text)) return "wb";
+  return "";
+}
+
+function preferredAccountForBank(bankFamily, cardSuffix = "") {
+  const candidates = knownAccountNames();
+  const familyMatches = candidates.filter((name) => detectBankFamily(name) === bankFamily);
+  if (cardSuffix) {
+    const exactCard = familyMatches.find((name) =>
+      new RegExp(`(?:\\*+|•+|\\s)${cardSuffix}$`).test(name)
+    );
+    if (exactCard) return exactCard;
+  }
+
+  const preferred = {
+    tbank: ["Тинькофф", "Т-Банк"],
+    sber: ["Сбербанк"],
+    alfa: ["Альфа-Банк"],
+    vtb: ["ВТБ"],
+    raiffeisen: ["Райффайзен"],
+    wb: ["Вайлдберриз Банк"]
+  }[bankFamily] || [];
+
+  for (const wanted of preferred) {
+    const exact = familyMatches.find((name) => normalizeBrandText(name) === normalizeBrandText(wanted));
+    if (exact) return exact;
+  }
+  if (familyMatches.length) return familyMatches[0];
+
+  return {
+    tbank: "Тинькофф",
+    sber: "Сбербанк",
+    alfa: "Альфа-Банк",
+    vtb: "ВТБ",
+    raiffeisen: "Райффайзен",
+    wb: "Вайлдберриз Банк"
+  }[bankFamily] || "";
+}
+
+function inferImportedBankFamily(row, source = "") {
+  return detectBankFamily([
+    source,
+    row.importSource,
+    row.account,
+    row.description,
+    row.payee
+  ].filter(Boolean).join(" "));
+}
+
+function reconcileImportedAccount(row, source = "") {
+  const bankFamily = inferImportedBankFamily(row, source);
+  if (!bankFamily) return row;
+
+  const suffix =
+    row.card ||
+    ((String(row.account || "").match(/(?:\*+|•+|\s)(\d{4})$/) || [])[1]) ||
+    "";
+  const account = preferredAccountForBank(bankFamily, suffix);
+  if (!account) return row;
+
+  const oldAccount = row.account;
+  row.account = account;
+  if (row.amount < 0) {
+    if (!row.from || row.from === oldAccount || /pdf|выписк/i.test(String(row.from))) row.from = account;
+    if (row.to === oldAccount || /pdf|выписк/i.test(String(row.to))) row.to = "";
+  } else {
+    if (!row.to || row.to === oldAccount || /pdf|выписк/i.test(String(row.to))) row.to = account;
+    if (row.from === oldAccount || /pdf|выписк/i.test(String(row.from))) row.from = "";
+  }
+  return row;
+}
+
+function isGeneratedPdfAccount(name) {
+  const text = String(name || "").trim();
+  return !text ||
+    /^PDF импорт$/i.test(text) ||
+    /\.pdf$/i.test(text) ||
+    /^PDF[:\s]/i.test(text) ||
+    /выписк.*\.pdf/i.test(text) ||
+    /statement.*\.pdf/i.test(text);
+}
+
+function cleanupImportedPdfAccounts() {
+  let changed = false;
+  state.rows.forEach((row) => {
+    const importedPdf = /^PDF(?: QR)?:/i.test(String(row.importSource || "")) ||
+      isGeneratedPdfAccount(row.account);
+    if (!importedPdf) return;
+
+    const before = [row.account, row.from, row.to].join("|");
+    reconcileImportedAccount(row, row.importSource || row.account || "");
+    const after = [row.account, row.from, row.to].join("|");
+    if (before !== after) changed = true;
+  });
+
+  const used = new Set();
+  state.rows.forEach((row) => [row.account, row.from, row.to].forEach((name) => name && used.add(name)));
+  const originalLength = state.accounts.length;
+  state.accounts = state.accounts.filter((account) =>
+    !isGeneratedPdfAccount(account?.name) || used.has(account.name)
+  );
+  if (state.accounts.length !== originalLength) changed = true;
+
+  if (changed) saveState();
+  return changed;
+}
+
 function operationFingerprint(row) {
   return [
     normalizeOperationText(row.authCode || ""),
     row.date || "",
     Math.round(Number(row.amount || 0) * 100),
-    normalizeOperationText(row.account || ""),
+    normalizeOperationText(preferredAccountForBank(inferImportedBankFamily(row, row.importSource || ""), row.card || "") || row.account || ""),
     normalizeOperationText(row.description || "").slice(0, 36)
   ].join("|");
 }
@@ -1100,6 +1984,7 @@ function importRows(rows, source) {
   const added = [];
   const duplicates = [];
   rows.forEach((row, index) => {
+    reconcileImportedAccount(row, source);
     const duplicate = findDuplicate(row);
     if (duplicate) {
       duplicates.push({
@@ -1635,11 +2520,11 @@ function parseStatementText(text, source) {
       amount,
       balance: 0,
       category: guessStatementCategory(description, amount),
-      account: source.replace(/\.(pdf|png|jpg|jpeg|webp)$/i, "") || "PDF импорт",
+      account: preferredAccountForBank(detectBankFamily(`${source} ${text}`)) || "",
       payee: "",
       project: "",
-      from: amount < 0 ? source : "",
-      to: amount >= 0 ? source : ""
+      from: "",
+      to: ""
     });
   });
   return rows;
@@ -1756,7 +2641,7 @@ function resetTransactionFilters() {
   if (byId("searchInput")) byId("searchInput").value = "";
   if (byId("accountFilter")) byId("accountFilter").value = "all";
   if (byId("categoryFilter")) byId("categoryFilter").value = "all";
-  if (byId("typeFilter")) byId("typeFilter").value = "all";
+  if (byId("typeFilter")) byId("typeFilter").value = "all";  if (byId("workExpenseFilter")) byId("workExpenseFilter").value = "all";
 }
 
 document.addEventListener("click", (event) => {
@@ -1786,19 +2671,35 @@ document.addEventListener("keydown", (event) => {
 
 byId("searchInput")?.addEventListener("input", () => {
   if (byId("searchInput").value.trim()) setView("transactions");
-  renderTransactions();
+  renderTransactions({ reset: true });
 });
-["accountFilter", "categoryFilter", "typeFilter"].forEach((id) => byId(id)?.addEventListener("input", renderTransactions));
-["accountFilter", "categoryFilter", "typeFilter"].forEach((id) => byId(id)?.addEventListener("change", renderTransactions));
+["accountFilter", "categoryFilter", "typeFilter", "workExpenseFilter"].forEach((id) => byId(id)?.addEventListener("input", () => renderTransactions({ reset: true })));
+["accountFilter", "categoryFilter", "typeFilter", "workExpenseFilter"].forEach((id) => byId(id)?.addEventListener("change", () => renderTransactions({ reset: true })));
 byId("reportPeriod")?.addEventListener("change", renderReports);
+byId("dashboardPeriod")?.addEventListener("change", renderDashboard);
 byId("drillPeriod")?.addEventListener("change", refreshDrilldown);
 byId("drillSort")?.addEventListener("change", refreshDrilldown);
 byId("clearFilters").addEventListener("click", () => {
   resetTransactionFilters();
-  renderTransactions();
+  renderTransactions({ reset: true });
 });
-byId("showAllTransactions")?.addEventListener("click", () => {
+byId("openWorkExpensesBtn")?.addEventListener("click", () => {
+  setView("transactions");
   resetTransactionFilters();
+  byId("workExpenseFilter").value = "work";
+  byId("typeFilter").value = "expense";
+  renderTransactions({ reset: true });
+});
+
+byId("notificationCenterBtn")?.addEventListener("click", () => {
+  setView("dashboard");
+  const insuranceAlerts = insuranceReminderPolicies();
+  const target = insuranceAlerts.length ? byId("insuranceAlertsPanel") : byId("workReimbursementPanel");
+  target?.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+byId("showAllTransactions")?.addEventListener("click", () => {
+  transactionPage.limit += transactionPage.step;
   renderTransactions();
 });
 
@@ -1807,17 +2708,222 @@ byId("addTxBtn").addEventListener("click", () => {
   populateCategorySelect();
   populateProjectSelect();
   byId("txForm").date.value = new Date().toISOString().slice(0, 10);
+  byId("txForm").elements.txType.value = "expense";
+  byId("txWorkExpense").checked = false;
+  byId("txWorkExpenseField").hidden = false;
+  populateCategorySelect("expense");
   byId("txDialog").showModal();
+});
+
+byId("txForm")?.elements?.txType?.addEventListener("change", (event) => {
+  populateCategorySelect(event.target.value);
+  const isExpense = event.target.value === "expense";
+  byId("txWorkExpenseField").hidden = !isExpense;
+  if (!isExpense) byId("txWorkExpense").checked = false;
 });
 
 byId("txForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.currentTarget).entries());
   const signedAmount = data.txType === "income" ? Math.abs(Number(data.amount)) : data.txType === "transfer" ? 0 : -Math.abs(Number(data.amount));
-  state.rows.push({ id: `manual-${Date.now()}`, date: data.date, description: data.description, amount: signedAmount, balance: 0, category: data.category, account: data.account, payee: "", project: data.project || categoryMeta(data.category).project || "", from: signedAmount < 0 || data.txType === "transfer" ? data.account : "", to: signedAmount >= 0 ? data.account : "" });
+  state.rows.push({ id: `manual-${Date.now()}`, date: data.date, description: data.description, amount: signedAmount, balance: 0, category: data.category, account: data.account, payee: "", project: data.project || categoryMeta(data.category).project || "", from: signedAmount < 0 || data.txType === "transfer" ? data.account : "", to: signedAmount >= 0 ? data.account : "", workExpense: data.txType === "expense" && data.workExpense === "true" });
   saveRows();
   byId("txDialog").close();
   render();
+});
+
+
+
+let editingInsuranceId = null;
+
+byId("addInsuranceBtn")?.addEventListener("click", () => {
+  editingInsuranceId = null;
+  populateInsuranceFormOptions();
+  byId("insuranceForm").reset();
+  const today = new Date().toISOString().slice(0, 10);
+  byId("insuranceForm").elements.startDate.value = today;
+  byId("insuranceForm").elements.endDate.value = addMonthsSafe(today, 12);
+  byId("insurancePdfHint").textContent = "Файл не выбран";
+  updateInsuranceProjectBySubject();
+  byId("insuranceDialog").showModal();
+});
+
+byId("insuranceSubjectType")?.addEventListener("change", updateInsuranceProjectBySubject);
+byId("insurancePdfInput")?.addEventListener("change", (event) => {
+  const file = event.target.files?.[0];
+  byId("insurancePdfHint").textContent = file ? `${file.name} • ${(file.size / 1024 / 1024).toFixed(2)} МБ` : "Файл не выбран";
+});
+
+byId("insuranceStatusFilter")?.addEventListener("change", renderInsurance);
+byId("insuranceProjectFilter")?.addEventListener("change", renderInsurance);
+
+byId("insuranceForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = byId("insuranceForm");
+  const data = Object.fromEntries(new FormData(form).entries());
+  const file = byId("insurancePdfInput").files?.[0];
+  const id = editingInsuranceId || `insurance-${Date.now()}`;
+  const existing = state.insurancePolicies.find((item) => item.id === id);
+
+  if (data.subjectType === "gymnastics" && !data.familyMember) {
+    byId("insuranceAutoNote").textContent = "Для страховки по гимнастике выберите ребёнка.";
+    return;
+  }
+
+  const policy = {
+    id,
+    name: data.name.trim(),
+    insurer: data.insurer.trim(),
+    policyNumber: data.policyNumber.trim(),
+    cost: Number(data.cost) || 0,
+    startDate: data.startDate,
+    endDate: data.endDate,
+    purchaseDate: existing?.purchaseDate || data.startDate,
+    subjectType: data.subjectType,
+    subjectName: data.subjectName.trim(),
+    project: data.project || insuranceProjectMap[data.subjectType] || "Прочее",
+    familyMember: data.familyMember || "",
+    expenseCategory: data.expenseCategory || "Страхование",
+    account: data.account || "",
+    comment: data.comment.trim(),
+    pdfStored: existing?.pdfStored || false,
+    pdfName: existing?.pdfName || "",
+    updatedAt: new Date().toISOString()
+  };
+
+  try {
+    if (file) {
+      await saveInsurancePdf(id, file);
+      policy.pdfStored = true;
+      policy.pdfName = file.name;
+    }
+  } catch (error) {
+    byId("insuranceAutoNote").textContent = `PDF не сохранён: ${error.message || error}`;
+    return;
+  }
+
+  if (existing) {
+    Object.assign(existing, policy);
+  } else {
+    state.insurancePolicies.push(policy);
+    addInsuranceExpense(policy);
+  }
+
+  if (!state.categories.some((item) => normalizeBrandText(item.name) === normalizeBrandText(policy.expenseCategory))) {
+    state.categories.push({
+      id: `category-insurance-${Date.now()}`,
+      name: policy.expenseCategory,
+      project: policy.project,
+      icon: "insurance",
+      categoryType: "expense"
+    });
+  }
+
+  saveState();
+  form.reset();
+  byId("insuranceDialog").close();
+  render();
+  setView("insurance");
+});
+
+document.addEventListener("click", async (event) => {
+  const reminderOpenButton = event.target.closest(".alert-open-insurance");
+  if (reminderOpenButton) {
+    setView("insurance");
+    const card = document.querySelector(`.edit-insurance[data-policy-id="${reminderOpenButton.dataset.policyId}"]`);
+    card?.click();
+    return;
+  }
+
+  const openButton = event.target.closest(".open-insurance-pdf");
+  if (openButton) {
+    const record = await getInsurancePdf(openButton.dataset.policyId);
+    if (!record?.blob) {
+      alert("PDF-файл не найден на этом устройстве.");
+      return;
+    }
+    const url = URL.createObjectURL(record.blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.target = "_blank";
+    link.download = record.name || "insurance-policy.pdf";
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    return;
+  }
+
+  const editButton = event.target.closest(".edit-insurance");
+  if (editButton) {
+    const policy = state.insurancePolicies.find((item) => item.id === editButton.dataset.policyId);
+    if (!policy) return;
+    editingInsuranceId = policy.id;
+    populateInsuranceFormOptions();
+    const form = byId("insuranceForm");
+    Object.entries(policy).forEach(([key, value]) => {
+      if (form.elements[key]) form.elements[key].value = value ?? "";
+    });
+    byId("insurancePdfHint").textContent = policy.pdfStored
+      ? `Сохранён файл: ${policy.pdfName || "полис.pdf"}`
+      : "PDF не загружен";
+    updateInsuranceProjectBySubject();
+    byId("insuranceDialog").showModal();
+    return;
+  }
+
+  const deleteButton = event.target.closest(".delete-insurance");
+  if (deleteButton) {
+    const id = deleteButton.dataset.policyId;
+    state.insurancePolicies = state.insurancePolicies.filter((item) => item.id !== id);
+    state.rows = state.rows.filter((row) => row.insurancePolicyId !== id);
+    await deleteInsurancePdf(id);
+    saveState();
+    renderInsurance();
+    renderTransactions({ reset: true });
+  }
+});
+
+byId("addFinanceProductBtn")?.addEventListener("click", () => {
+  populateFinanceCategorySelects();
+  byId("financeProductForm").reset();
+  byId("financeProductForm").elements.startDate.value = new Date().toISOString().slice(0, 10);
+  byId("financeProductForm").elements.termMonths.value = 12;
+  byId("financeProductForm").elements.paymentDay.value = 10;
+  toggleFinanceProductFields();
+  byId("financeProductDialog").showModal();
+});
+
+byId("financeProductType")?.addEventListener("change", toggleFinanceProductFields);
+byId("financeProductForm")?.addEventListener("input", updateFinanceCalculationPreview);
+byId("financeProductForm")?.addEventListener("change", updateFinanceCalculationPreview);
+
+byId("financeProductForm")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const product = currentFinanceFormProduct();
+  product.id = `finance-${Date.now()}`;
+  state.financialProducts.push(product);
+
+  if (product.type === "loan" && !state.categories.some((item) => normalizeBrandText(item.name) === normalizeBrandText(product.expenseCategory))) {
+    state.categories.push({ id: `category-${Date.now()}-loan`, name: product.expenseCategory, project: "", icon: "credit", categoryType: "expense" });
+  }
+  if (product.type === "deposit" && !state.categories.some((item) => normalizeBrandText(item.name) === normalizeBrandText(product.incomeCategory))) {
+    state.categories.push({ id: `category-${Date.now()}-deposit`, name: product.incomeCategory, project: "", icon: "income", categoryType: "income" });
+  }
+
+  saveState();
+  byId("financeProductDialog").close();
+  render();
+  setView("finance-products");
+});
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest(".delete-finance-product");
+  if (!button) return;
+  const id = button.dataset.productId;
+  state.financialProducts = state.financialProducts.filter((item) => item.id !== id);
+  saveState();
+  renderFinanceProducts();
 });
 
 byId("addCategoryBtn")?.addEventListener("click", () => {
@@ -1832,7 +2938,7 @@ byId("categoryForm")?.addEventListener("submit", (event) => {
   const name = data.name.trim();
   if (!name) return;
   const existing = state.categories.find((category) => normalizeBrandText(category.name) === normalizeBrandText(name));
-  const payload = { id: existing?.id || `category-${Date.now()}`, name, project: data.project.trim(), icon: data.icon || detectCategoryIcon(name) };
+  const payload = { id: existing?.id || `category-${Date.now()}`, name, project: data.project.trim(), icon: data.icon || detectCategoryIcon(name), categoryType: data.categoryType || "expense" };
   if (existing) Object.assign(existing, payload);
   else state.categories.push(payload);
   saveState();
@@ -1858,26 +2964,218 @@ byId("shoppingForm")?.addEventListener("submit", (event) => {
 
 byId("exportBtn")?.addEventListener("click", exportData);
 
-function exportData() {
-  const payload = {
+function buildBackupPayload() {
+  return {
+    app: "ФинПорядок",
+    format: "finporyadok-backup",
+    schemaVersion: 2,
     exportedAt: new Date().toISOString(),
     source: window.ANDROMONEY_DATA?.source || "Локальные данные",
-    rows: state.rows,
-    accounts: state.accounts,
-    categories: state.categories,
-    importArchive: state.importArchive,
-    shopping: state.shopping
+    data: {
+      rows: state.rows,
+      accounts: state.accounts,
+      categories: state.categories,
+      importArchive: state.importArchive,
+      shopping: state.shopping,
+      financialProducts: state.financialProducts,
+      insurancePolicies: state.insurancePolicies
+    }
   };
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+}
+
+function safeFileDate() {
+  return new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+}
+
+function saveTextFile(filename, mimeType, text) {
+  if (window.AndroidFileBridge && typeof window.AndroidFileBridge.saveTextFile === "function") {
+    window.AndroidFileBridge.saveTextFile(filename, mimeType, text);
+    return;
+  }
+  const blob = new Blob([text], { type: `${mimeType};charset=utf-8` });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `finporyadok-export-${new Date().toISOString().slice(0, 10)}.json`;
+  link.download = filename;
   document.body.append(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+function exportData() {
+  const payload = buildBackupPayload();
+  const filename = `finporyadok-backup-${safeFileDate()}.json`;
+  saveTextFile(filename, "application/json", JSON.stringify(payload, null, 2));
+  localStorage.setItem(`${storeKey}.lastBackupAt`, new Date().toISOString());
+  showBackupMessage(`Создаётся резервная копия: ${filename}`);
+  updateDatabaseStatus();
+}
+
+function csvEscape(value) {
+  const text = String(value ?? "").replace(/\r?\n/g, " ");
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function exportTransactionsCsv() {
+  const headers = [
+    "ID", "Дата", "Время", "Тип", "Описание", "Сумма", "Счёт",
+    "Счёт списания", "Счёт зачисления", "Категория", "Контрагент",
+    "Член семьи", "Проект", "Расход по работе", "Комментарий", "Метки", "Источник импорта"
+  ];
+  const lines = [headers.map(csvEscape).join(";")];
+  state.rows.forEach((row) => {
+    const txType = typeOf(row);
+    lines.push([
+      row.id || row.alzexId || "",
+      row.date || "",
+      row.time || "",
+      txType === "income" ? "Доход" : txType === "expense" ? "Расход" : "Перевод",
+      row.description || "",
+      txType === "transfer" ? Math.abs(Number(row.transferAmount) || 0) : Number(row.amount) || 0,
+      row.account || "",
+      row.from || "",
+      row.to || "",
+      row.category || "",
+      row.payee || "",
+      row.familyMember || "",
+      row.project || "",
+      row.workExpense ? "Да" : "Нет",
+      row.comment || "",
+      row.tags || "",
+      row.importSource || ""
+    ].map(csvEscape).join(";"));
+  });
+  const filename = `finporyadok-operations-${safeFileDate()}.csv`;
+  saveTextFile(filename, "text/csv", "\uFEFF" + lines.join("\r\n"));
+  showBackupMessage(`Создаётся CSV-файл: ${filename}`);
+}
+
+function updateDatabaseStatus() {
+  const savedAt = localStorage.getItem(`${storeKey}.lastSavedAt`);
+  const backupAt = localStorage.getItem(`${storeKey}.lastBackupAt`);
+  if (byId("lastSavedAt")) {
+    byId("lastSavedAt").textContent = savedAt
+      ? new Date(savedAt).toLocaleString("ru-RU")
+      : "Данные ещё не изменялись";
+  }
+  if (byId("databaseStats")) {
+    byId("databaseStats").textContent =
+      `${state.rows.length} операций · ${state.accounts.length} счетов · ${state.categories.length} категорий · ${state.financialProducts.length} вкладов/кредитов · ${state.insurancePolicies.length} страховок`;
+  }
+  if (byId("backupMessage") && backupAt) {
+    byId("backupMessage").textContent =
+      `Последняя резервная копия запрошена ${new Date(backupAt).toLocaleString("ru-RU")}.`;
+  }
+}
+
+function showBackupMessage(message) {
+  if (byId("backupMessage")) byId("backupMessage").textContent = message;
+}
+
+let pendingBackupRestore = null;
+
+function normalizeBackupPayload(parsed) {
+  const data = parsed?.format === "finporyadok-backup" ? parsed.data : parsed;
+  if (!data || !Array.isArray(data.rows)) {
+    throw new Error("В файле не найден список операций ФинПорядок.");
+  }
+  return {
+    rows: data.rows,
+    accounts: Array.isArray(data.accounts) ? data.accounts : [],
+    categories: Array.isArray(data.categories) ? data.categories : [],
+    importArchive: Array.isArray(data.importArchive) ? data.importArchive : [],
+    shopping: Array.isArray(data.shopping) ? data.shopping : [],
+    financialProducts: Array.isArray(data.financialProducts) ? data.financialProducts : [],
+    insurancePolicies: Array.isArray(data.insurancePolicies) ? data.insurancePolicies : []
+  };
+}
+
+function backupRowKey(row) {
+  return row.id || row.alzexId || row.receipt?.fiscalKey ||
+    [row.date, row.time, row.description, row.amount, row.account].join("|");
+}
+
+function mergeUnique(current, incoming, keyFn) {
+  const result = [...current];
+  const keys = new Set(current.map(keyFn));
+  incoming.forEach((item) => {
+    const key = keyFn(item);
+    if (!keys.has(key)) {
+      keys.add(key);
+      result.push(item);
+    }
+  });
+  return result;
+}
+
+function applyBackup(mode) {
+  if (!pendingBackupRestore) return;
+  if (mode === "replace") {
+    state.rows = pendingBackupRestore.rows;
+    state.accounts = pendingBackupRestore.accounts;
+    state.categories = pendingBackupRestore.categories;
+    state.importArchive = pendingBackupRestore.importArchive;
+    state.shopping = pendingBackupRestore.shopping;
+    state.financialProducts = pendingBackupRestore.financialProducts;
+    state.insurancePolicies = pendingBackupRestore.insurancePolicies;
+  } else {
+    state.rows = mergeUnique(state.rows, pendingBackupRestore.rows, backupRowKey);
+    state.accounts = mergeUnique(state.accounts, pendingBackupRestore.accounts, (item) => item.id || item.name);
+    state.categories = mergeUnique(state.categories, pendingBackupRestore.categories, (item) => item.id || item.name);
+    state.importArchive = mergeUnique(state.importArchive, pendingBackupRestore.importArchive, (item) => item.id || JSON.stringify(item));
+    state.shopping = mergeUnique(state.shopping, pendingBackupRestore.shopping, (item) => item.id || `${item.name}|${item.date}`);
+    state.financialProducts = mergeUnique(state.financialProducts, pendingBackupRestore.financialProducts, (item) => item.id || `${item.type}|${item.name}|${item.startDate}`);
+    state.insurancePolicies = mergeUnique(state.insurancePolicies, pendingBackupRestore.insurancePolicies, (item) => item.id || `${item.policyNumber}|${item.name}|${item.startDate}`);
+  }
+  ensureRowIds();
+  saveState();
+  pendingBackupRestore = null;
+  byId("restoreDialog")?.close();
+  render();
+  setView("dashboard");
+  showBackupMessage(mode === "replace"
+    ? "База полностью восстановлена из резервной копии."
+    : "Данные из резервной копии объединены с текущей базой.");
+}
+
+byId("backupJsonBtn")?.addEventListener("click", exportData);
+byId("exportCsvBtn")?.addEventListener("click", exportTransactionsCsv);
+byId("restoreBackupBtn")?.addEventListener("click", () => byId("backupRestoreInput")?.click());
+
+byId("backupRestoreInput")?.addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    pendingBackupRestore = normalizeBackupPayload(JSON.parse(text));
+    byId("restoreFileName").textContent = file.name;
+    byId("restoreSummary").innerHTML = `
+      <div><span>Операции</span><strong>${pendingBackupRestore.rows.length}</strong></div>
+      <div><span>Счета</span><strong>${pendingBackupRestore.accounts.length}</strong></div>
+      <div><span>Категории</span><strong>${pendingBackupRestore.categories.length}</strong></div>
+      <div><span>Покупки</span><strong>${pendingBackupRestore.shopping.length}</strong></div>
+      <div><span>Вклады и кредиты</span><strong>${pendingBackupRestore.financialProducts.length}</strong></div>
+      <div><span>Страховки</span><strong>${pendingBackupRestore.insurancePolicies.length}</strong></div>
+    `;
+    byId("restoreDialog").showModal();
+  } catch (error) {
+    showBackupMessage(`Не удалось открыть резервную копию: ${error.message || error}`);
+  } finally {
+    event.target.value = "";
+  }
+});
+
+byId("mergeBackupBtn")?.addEventListener("click", () => applyBackup("merge"));
+byId("replaceBackupBtn")?.addEventListener("click", () => applyBackup("replace"));
+
+window.onNativeFileSaved = function(filename) {
+  showBackupMessage(`Файл сохранён: ${filename}`);
+};
+
+window.onNativeFileSaveError = function(message) {
+  showBackupMessage(`Не удалось сохранить файл: ${message || "неизвестная ошибка"}`);
+};
 
 byId("addAccountBtn")?.addEventListener("click", () => {
   byId("accountForm").reset();
@@ -1933,7 +3231,7 @@ byId("pdfInput")?.addEventListener("change", async (event) => {
           source: `PDF QR: ${file.name}`,
           reason: "QR подлинности найден, но операции в QR не хранятся",
           existingId: "",
-          row: { date: new Date().toISOString().slice(0, 10), description: file.name, amount: 0, account: "PDF импорт", category: "Подлинность" }
+          row: { date: new Date().toISOString().slice(0, 10), description: file.name, amount: 0, account: "", category: "Подлинность" }
         });
       }
     }
@@ -1944,7 +3242,7 @@ byId("pdfInput")?.addEventListener("change", async (event) => {
         source: `PDF: ${file.name}`,
         reason: "файл проверен, текстовые операции не найдены",
         existingId: "",
-        row: { date: new Date().toISOString().slice(0, 10), description: file.name, amount: 0, account: "PDF импорт", category: "Не распознано" }
+        row: { date: new Date().toISOString().slice(0, 10), description: file.name, amount: 0, account: "", category: "Не распознано" }
       });
       saveState();
       renderImportArchive();
@@ -1952,7 +3250,7 @@ byId("pdfInput")?.addEventListener("change", async (event) => {
       return;
     }
     const result = importRows(rows, source);
-    byId("importResult").textContent = `${source} обработан: добавлено ${result.added}, дубликатов в архиве ${result.duplicates}.`;
+    byId("importResult").textContent = `${source} обработан: добавлено ${result.added}, уже существующих операций ${result.duplicates}. Счёт сопоставлен с существующим банком.`;
   } catch (error) {
     byId("importResult").textContent = `PDF не распознан: ${error.message || error}`;
   } finally {
@@ -2223,6 +3521,7 @@ byId("receiptForm")?.addEventListener("submit", (event) => {
     from: data.account,
     to: "",
     importSource: "Кассовый QR",
+    workExpense: data.workExpense === "true",
     receipt: {
       fiscalKey,
       fn: data.fn,
@@ -2249,6 +3548,7 @@ byId("receiptForm")?.addEventListener("submit", (event) => {
 });
 
 
+cleanupImportedPdfAccounts();
 render();
 
 byId("nativeReceiptScanBtn")?.addEventListener("click", () => {
@@ -2256,3 +3556,6 @@ byId("nativeReceiptScanBtn")?.addEventListener("click", () => {
     byId("receiptQrInput")?.click();
   }
 });
+
+updateDatabaseStatus();
+window.addEventListener("beforeunload", saveState);
