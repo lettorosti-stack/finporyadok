@@ -133,6 +133,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void fetchMoscowChildMinimum(String requestedPeriod) {
             new Thread(() -> {
+                long deadline = System.currentTimeMillis() + 12000L;
                 try {
                     java.util.Calendar now = java.util.Calendar.getInstance();
                     int year = now.get(java.util.Calendar.YEAR), month = now.get(java.util.Calendar.MONTH) + 1;
@@ -144,56 +145,48 @@ public class MainActivity extends Activity {
                     int quarter = (month - 1) / 3 + 1;
                     String half = month <= 6 ? "первое полугодие" : "второе полугодие";
                     String periodKey = String.format(java.util.Locale.US, "%04d-%02d", year, month);
+                    String cacheKey = year >= 2021 ? "year:" + year : (year >= 2013 ? "half:" + year + ":" + (month <= 6 ? 1 : 2) : "quarter:" + year + ":" + quarter);
                     String periodPhrase = year >= 2021 ? (year + " год") : (year >= 2013 ? (half + " " + year) : (quarter + " квартал " + year));
 
-                    String[] queries = new String[] {
-                            "прожиточный минимум Москва для детей " + periodPhrase + " постановление Правительства Москвы",
-                            "величина прожиточного минимума в городе Москве для детей " + periodPhrase,
-                            "прожиточный минимум на ребенка Москва " + quarter + " квартал " + year,
-                            "прожиточный минимум на ребенка Москва " + half + " " + year,
-                            "прожиточный минимум Москва для детей " + year
-                    };
+                    // Для известных периодов сначала открываем прямые публикации без поисковой выдачи.
+                    java.util.ArrayList<String> directUrls = new java.util.ArrayList<>();
+                    if (year == 2026) directUrls.add("https://www.garant.ru/hotlaw/moscow/1908878/");
+
+                    String exactQuery = "величина прожиточного минимума в городе Москве для детей " + periodPhrase + " постановление Правительства Москвы";
+                    String encoded = URLEncoder.encode(exactQuery, "UTF-8");
                     java.util.ArrayList<String> searchUrls = new java.util.ArrayList<>();
-                    for (String query : queries) {
-                        String encoded = URLEncoder.encode(query, "UTF-8");
-                        searchUrls.add("https://www.garant.ru/search/?q=" + encoded);
-                        searchUrls.add("https://www.garant.ru/hotlaw/moscow/?q=" + encoded);
-                        searchUrls.add("https://publication.pravo.gov.ru/Search/Document?searchtext=" + encoded);
-                        searchUrls.add("https://pravo.gov.ru/proxy/ips/?searchres=&bpas=cd00000&intelsearch=" + encoded);
-                    }
+                    searchUrls.add("https://www.garant.ru/search/?q=" + encoded);
+                    searchUrls.add("https://www.garant.ru/hotlaw/moscow/?q=" + encoded);
+                    searchUrls.add("https://publication.pravo.gov.ru/Search/Document?searchtext=" + encoded);
 
                     Exception lastError = null;
-                    for (String searchUrl : searchUrls) {
+                    for (String sourceUrl : directUrls) {
+                        if (System.currentTimeMillis() >= deadline) break;
                         try {
-                            String searchHtml = readUrl(searchUrl);
-                            java.util.List<String> candidates = findPmDocumentUrls(searchHtml, searchUrl);
-                            candidates.add(0, searchUrl);
-                            for (String sourceUrl : candidates) {
-                                try {
-                                    String html = sourceUrl.equals(searchUrl) ? searchHtml : readUrl(sourceUrl);
-                                    String plain = Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY).toString()
-                                            .replace('\u00A0', ' ').replaceAll("\\s+", " ");
-                                    long amount = extractChildMinimum(plain, year);
-                                    if (amount <= 0) continue;
-                                    String decree = extractDecreeNumber(plain);
-                                    JSONObject result = new JSONObject();
-                                    result.put("region", "Москва");
-                                    result.put("year", year);
-                                    result.put("periodKey", periodKey);
-                                    result.put("periodLabel", periodPhrase);
-                                    result.put("amount", amount);
-                                    result.put("decreeNumber", decree == null ? "" : decree);
-                                    result.put("decreeUrl", sourceUrl);
-                                    result.put("source", sourceUrl.contains("garant.ru") ? "ГАРАНТ" : "Официальный портал правовой информации");
-                                    result.put("fetchedAt", new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US).format(new java.util.Date()));
-                                    String js = "window.onMoscowChildMinimumLoaded(" + JSONObject.quote(result.toString()) + ");";
-                                    webView.post(() -> webView.evaluateJavascript(js, null));
-                                    return;
-                                } catch (Exception inner) { lastError = inner; }
-                            }
-                        } catch (Exception outer) { lastError = outer; }
+                            JSONObject found = parsePmPage(sourceUrl, year, periodKey, cacheKey, periodPhrase, deadline);
+                            if (found != null) { sendMoscowPm(found); return; }
+                        } catch (Exception error) { lastError = error; }
                     }
-                    throw new IllegalStateException(lastError == null ? "Данные за выбранный год не найдены" : lastError.getMessage());
+
+                    for (String searchUrl : searchUrls) {
+                        if (System.currentTimeMillis() >= deadline) break;
+                        try {
+                            String searchHtml = readUrl(searchUrl, 3500, 4500);
+                            java.util.List<String> candidates = findPmDocumentUrls(searchHtml, searchUrl);
+                            int checked = 0;
+                            for (String sourceUrl : candidates) {
+                                if (checked++ >= 4 || System.currentTimeMillis() >= deadline) break;
+                                try {
+                                    JSONObject found = parsePmPage(sourceUrl, year, periodKey, cacheKey, periodPhrase, deadline);
+                                    if (found != null) { sendMoscowPm(found); return; }
+                                } catch (Exception error) { lastError = error; }
+                            }
+                            // Иногда сумма присутствует прямо в выдаче.
+                            JSONObject fromSearch = parsePmHtml(searchHtml, searchUrl, year, periodKey, cacheKey, periodPhrase);
+                            if (fromSearch != null) { sendMoscowPm(fromSearch); return; }
+                        } catch (Exception error) { lastError = error; }
+                    }
+                    throw new IllegalStateException(lastError == null ? "Данные за выбранный период не найдены за 12 секунд" : lastError.getMessage());
                 } catch (Exception error) {
                     String message = error.getMessage() == null ? "Ошибка загрузки данных" : error.getMessage();
                     String js = "window.onMoscowChildMinimumError(" + JSONObject.quote(message) + ");";
@@ -201,6 +194,37 @@ public class MainActivity extends Activity {
                 }
             }).start();
         }
+    }
+
+    private JSONObject parsePmPage(String sourceUrl, int year, String periodKey, String cacheKey, String periodPhrase, long deadline) throws Exception {
+        if (System.currentTimeMillis() >= deadline) return null;
+        String html = readUrl(sourceUrl, 3500, 4500);
+        return parsePmHtml(html, sourceUrl, year, periodKey, cacheKey, periodPhrase);
+    }
+
+    private JSONObject parsePmHtml(String html, String sourceUrl, int year, String periodKey, String cacheKey, String periodPhrase) throws Exception {
+        String plain = Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY).toString()
+                .replace('\u00A0', ' ').replaceAll("\\s+", " ");
+        long amount = extractChildMinimum(plain, year);
+        if (amount <= 0) return null;
+        String decree = extractDecreeNumber(plain);
+        JSONObject result = new JSONObject();
+        result.put("region", "Москва");
+        result.put("year", year);
+        result.put("periodKey", periodKey);
+        result.put("cacheKey", cacheKey);
+        result.put("periodLabel", periodPhrase);
+        result.put("amount", amount);
+        result.put("decreeNumber", decree == null ? "" : decree);
+        result.put("decreeUrl", sourceUrl);
+        result.put("source", sourceUrl.contains("garant.ru") ? "ГАРАНТ" : "Официальный портал правовой информации");
+        result.put("fetchedAt", new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US).format(new java.util.Date()));
+        return result;
+    }
+
+    private void sendMoscowPm(JSONObject result) {
+        String js = "window.onMoscowChildMinimumLoaded(" + JSONObject.quote(result.toString()) + ");";
+        webView.post(() -> webView.evaluateJavascript(js, null));
     }
 
     private java.util.List<String> findPmDocumentUrls(String html, String baseUrl) {
@@ -212,7 +236,7 @@ public class MainActivity extends Activity {
         };
         for (Pattern pattern : patterns) {
             Matcher matcher = pattern.matcher(html);
-            while (matcher.find() && urls.size() < 20) {
+            while (matcher.find() && urls.size() < 8) {
                 String value = matcher.group(1).replace("&amp;", "&");
                 try { urls.add(new URL(new URL(baseUrl), value).toString()); } catch (Exception ignored) { }
             }
@@ -221,9 +245,13 @@ public class MainActivity extends Activity {
     }
 
     private String readUrl(String urlText) throws Exception {
+        return readUrl(urlText, 3500, 4500);
+    }
+
+    private String readUrl(String urlText, int connectTimeout, int readTimeout) throws Exception {
         HttpURLConnection connection = (HttpURLConnection) new URL(urlText).openConnection();
-        connection.setConnectTimeout(15000);
-        connection.setReadTimeout(20000);
+        connection.setConnectTimeout(connectTimeout);
+        connection.setReadTimeout(readTimeout);
         connection.setInstanceFollowRedirects(true);
         connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Android) FinPoryadok/0.7");
         connection.setRequestProperty("Accept-Language", "ru-RU,ru;q=0.9");
