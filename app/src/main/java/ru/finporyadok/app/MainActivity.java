@@ -19,6 +19,9 @@ import java.util.regex.Pattern;
 import android.text.Html;
 import java.nio.charset.StandardCharsets;
 import android.webkit.JavascriptInterface;
+import android.util.Base64;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
@@ -71,6 +74,7 @@ public class MainActivity extends Activity {
         webView.addJavascriptInterface(new AndroidQrBridge(), "AndroidQrScanner");
         webView.addJavascriptInterface(new AndroidFileBridge(), "AndroidFileBridge");
         webView.addJavascriptInterface(new AndroidOfficialDataBridge(), "AndroidOfficialDataBridge");
+        webView.addJavascriptInterface(new AndroidReceiptOcrBridge(), "AndroidReceiptOcr");
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest request) {
@@ -311,6 +315,30 @@ public class MainActivity extends Activity {
         Pattern pattern = Pattern.compile("(?:постановлен(?:ие|ия)[^№]{0,80})?№\\s*([0-9]+(?:-[А-ЯA-Z]{1,4})?)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
         Matcher matcher = pattern.matcher(text);
         return matcher.find() ? "Постановление № " + matcher.group(1) : "";
+    }
+
+    public final class AndroidReceiptOcrBridge {
+        @JavascriptInterface
+        public void recognizeBase64(String base64) {
+            runOnUiThread(() -> {
+                try {
+                    byte[] bytes = Base64.decode(base64, Base64.DEFAULT);
+                    Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                    if (bitmap == null) { sendReceiptOcrError("Не удалось открыть изображение чека."); return; }
+                    com.google.mlkit.vision.common.InputImage image = com.google.mlkit.vision.common.InputImage.fromBitmap(bitmap, 0);
+                    com.google.mlkit.vision.text.TextRecognizer recognizer = com.google.mlkit.vision.text.TextRecognition.getClient(com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS);
+                    recognizer.process(image).addOnSuccessListener(result -> {
+                        String js = "window.onNativeReceiptTextRecognized(" + JSONObject.quote(result.getText()) + ");";
+                        webView.evaluateJavascript(js, null);
+                    }).addOnFailureListener(error -> sendReceiptOcrError(error.getMessage() == null ? "Не удалось распознать текст чека." : error.getMessage()));
+                } catch (Exception error) { sendReceiptOcrError(error.getMessage() == null ? "Ошибка распознавания чека." : error.getMessage()); }
+            });
+        }
+    }
+
+    private void sendReceiptOcrError(String message) {
+        String js = "window.onNativeReceiptTextError(" + JSONObject.quote(message) + ");";
+        webView.evaluateJavascript(js, null);
     }
 
     public final class AndroidFileBridge {
