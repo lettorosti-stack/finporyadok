@@ -131,23 +131,42 @@ public class MainActivity extends Activity {
 
     public final class AndroidOfficialDataBridge {
         @JavascriptInterface
-        public void fetchMoscowChildMinimum(String requestedYear) {
+        public void fetchMoscowChildMinimum(String requestedPeriod) {
             new Thread(() -> {
                 try {
-                    int year;
-                    try { year = Integer.parseInt(requestedYear); }
-                    catch (Exception ignored) { year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR); }
+                    java.util.Calendar now = java.util.Calendar.getInstance();
+                    int year = now.get(java.util.Calendar.YEAR), month = now.get(java.util.Calendar.MONTH) + 1;
+                    try {
+                        String[] parts = requestedPeriod == null ? new String[0] : requestedPeriod.split("-");
+                        year = Integer.parseInt(parts[0]);
+                        if (parts.length > 1) month = Math.max(1, Math.min(12, Integer.parseInt(parts[1])));
+                    } catch (Exception ignored) { }
+                    int quarter = (month - 1) / 3 + 1;
+                    String half = month <= 6 ? "первое полугодие" : "второе полугодие";
+                    String periodKey = String.format(java.util.Locale.US, "%04d-%02d", year, month);
+                    String periodPhrase = year >= 2021 ? (year + " год") : (year >= 2013 ? (half + " " + year) : (quarter + " квартал " + year));
 
-                    String query = "величина прожиточного минимума город Москва для детей " + year + " постановление Правительства Москвы";
-                    String[] searchUrls = new String[] {
-                            "https://publication.pravo.gov.ru/Search/Document?searchtext=" + URLEncoder.encode(query, "UTF-8"),
-                            "https://pravo.gov.ru/proxy/ips/?searchres=&bpas=cd00000&intelsearch=" + URLEncoder.encode(query, "UTF-8")
+                    String[] queries = new String[] {
+                            "прожиточный минимум Москва для детей " + periodPhrase + " постановление Правительства Москвы",
+                            "величина прожиточного минимума в городе Москве для детей " + periodPhrase,
+                            "прожиточный минимум на ребенка Москва " + quarter + " квартал " + year,
+                            "прожиточный минимум на ребенка Москва " + half + " " + year,
+                            "прожиточный минимум Москва для детей " + year
                     };
+                    java.util.ArrayList<String> searchUrls = new java.util.ArrayList<>();
+                    for (String query : queries) {
+                        String encoded = URLEncoder.encode(query, "UTF-8");
+                        searchUrls.add("https://www.garant.ru/search/?q=" + encoded);
+                        searchUrls.add("https://www.garant.ru/hotlaw/moscow/?q=" + encoded);
+                        searchUrls.add("https://publication.pravo.gov.ru/Search/Document?searchtext=" + encoded);
+                        searchUrls.add("https://pravo.gov.ru/proxy/ips/?searchres=&bpas=cd00000&intelsearch=" + encoded);
+                    }
+
                     Exception lastError = null;
                     for (String searchUrl : searchUrls) {
                         try {
                             String searchHtml = readUrl(searchUrl);
-                            java.util.List<String> candidates = findOfficialDocumentUrls(searchHtml, searchUrl);
+                            java.util.List<String> candidates = findPmDocumentUrls(searchHtml, searchUrl);
                             candidates.add(0, searchUrl);
                             for (String sourceUrl : candidates) {
                                 try {
@@ -160,10 +179,12 @@ public class MainActivity extends Activity {
                                     JSONObject result = new JSONObject();
                                     result.put("region", "Москва");
                                     result.put("year", year);
+                                    result.put("periodKey", periodKey);
+                                    result.put("periodLabel", periodPhrase);
                                     result.put("amount", amount);
                                     result.put("decreeNumber", decree == null ? "" : decree);
                                     result.put("decreeUrl", sourceUrl);
-                                    result.put("source", "Официальный интернет-портал правовой информации");
+                                    result.put("source", sourceUrl.contains("garant.ru") ? "ГАРАНТ" : "Официальный портал правовой информации");
                                     result.put("fetchedAt", new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US).format(new java.util.Date()));
                                     String js = "window.onMoscowChildMinimumLoaded(" + JSONObject.quote(result.toString()) + ");";
                                     webView.post(() -> webView.evaluateJavascript(js, null));
@@ -172,9 +193,9 @@ public class MainActivity extends Activity {
                             }
                         } catch (Exception outer) { lastError = outer; }
                     }
-                    throw new IllegalStateException(lastError == null ? "Официальные данные не найдены" : lastError.getMessage());
+                    throw new IllegalStateException(lastError == null ? "Данные за выбранный год не найдены" : lastError.getMessage());
                 } catch (Exception error) {
-                    String message = error.getMessage() == null ? "Ошибка загрузки официальных данных" : error.getMessage();
+                    String message = error.getMessage() == null ? "Ошибка загрузки данных" : error.getMessage();
                     String js = "window.onMoscowChildMinimumError(" + JSONObject.quote(message) + ");";
                     webView.post(() -> webView.evaluateJavascript(js, null));
                 }
@@ -182,13 +203,19 @@ public class MainActivity extends Activity {
         }
     }
 
-    private java.util.List<String> findOfficialDocumentUrls(String html, String baseUrl) {
+    private java.util.List<String> findPmDocumentUrls(String html, String baseUrl) {
         java.util.LinkedHashSet<String> urls = new java.util.LinkedHashSet<>();
-        Pattern pattern = Pattern.compile("(?:href=)?[\\\"']([^\\\"']*(?:Document/View|document/view|Document\\?id=|/document/)[^\\\"']*)[\\\"']", Pattern.CASE_INSENSITIVE);
-        Matcher matcher = pattern.matcher(html);
-        while (matcher.find() && urls.size() < 8) {
-            String value = matcher.group(1).replace("&amp;", "&");
-            try { urls.add(new URL(new URL(baseUrl), value).toString()); } catch (Exception ignored) { }
+        Pattern[] patterns = new Pattern[] {
+                Pattern.compile("[\\\"']([^\\\"']*/hotlaw/moscow/\\d+/?[^\\\"']*)[\\\"']", Pattern.CASE_INSENSITIVE),
+                Pattern.compile("[\\\"']([^\\\"']*(?:Document/View|document/view|Document\\?id=|/document/)[^\\\"']*)[\\\"']", Pattern.CASE_INSENSITIVE),
+                Pattern.compile("[\\\"']([^\\\"']*/products/ipo/prime/doc/[^\\\"']*)[\\\"']", Pattern.CASE_INSENSITIVE)
+        };
+        for (Pattern pattern : patterns) {
+            Matcher matcher = pattern.matcher(html);
+            while (matcher.find() && urls.size() < 20) {
+                String value = matcher.group(1).replace("&amp;", "&");
+                try { urls.add(new URL(new URL(baseUrl), value).toString()); } catch (Exception ignored) { }
+            }
         }
         return new java.util.ArrayList<>(urls);
     }
