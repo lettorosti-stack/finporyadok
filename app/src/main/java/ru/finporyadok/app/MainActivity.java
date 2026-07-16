@@ -138,34 +138,41 @@ public class MainActivity extends Activity {
                     try { year = Integer.parseInt(requestedYear); }
                     catch (Exception ignored) { year = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR); }
 
-                    String query = "прожиточный минимум для детей Москва " + year + " постановление";
-                    String searchUrl = "https://www.mos.ru/search/?q=" + URLEncoder.encode(query, "UTF-8");
-                    String searchHtml = readUrl(searchUrl);
-                    String documentUrl = findOfficialDocumentUrl(searchHtml);
-                    String sourceUrl = documentUrl == null ? searchUrl : documentUrl;
-                    String documentHtml = documentUrl == null ? searchHtml : readUrl(documentUrl);
-                    String plain = Html.fromHtml(documentHtml, Html.FROM_HTML_MODE_LEGACY).toString()
-                            .replace('\u00A0', ' ').replaceAll("\\s+", " ");
-
-                    long amount = extractChildMinimum(plain, year);
-                    if (amount <= 0) {
-                        String searchPlain = Html.fromHtml(searchHtml, Html.FROM_HTML_MODE_LEGACY).toString()
-                                .replace('\u00A0', ' ').replaceAll("\\s+", " ");
-                        amount = extractChildMinimum(searchPlain, year);
+                    String query = "величина прожиточного минимума город Москва для детей " + year + " постановление Правительства Москвы";
+                    String[] searchUrls = new String[] {
+                            "https://publication.pravo.gov.ru/Search/Document?searchtext=" + URLEncoder.encode(query, "UTF-8"),
+                            "https://pravo.gov.ru/proxy/ips/?searchres=&bpas=cd00000&intelsearch=" + URLEncoder.encode(query, "UTF-8")
+                    };
+                    Exception lastError = null;
+                    for (String searchUrl : searchUrls) {
+                        try {
+                            String searchHtml = readUrl(searchUrl);
+                            java.util.List<String> candidates = findOfficialDocumentUrls(searchHtml, searchUrl);
+                            candidates.add(0, searchUrl);
+                            for (String sourceUrl : candidates) {
+                                try {
+                                    String html = sourceUrl.equals(searchUrl) ? searchHtml : readUrl(sourceUrl);
+                                    String plain = Html.fromHtml(html, Html.FROM_HTML_MODE_LEGACY).toString()
+                                            .replace('\u00A0', ' ').replaceAll("\\s+", " ");
+                                    long amount = extractChildMinimum(plain, year);
+                                    if (amount <= 0) continue;
+                                    String decree = extractDecreeNumber(plain);
+                                    JSONObject result = new JSONObject();
+                                    result.put("region", "Москва");
+                                    result.put("year", year);
+                                    result.put("amount", amount);
+                                    result.put("decreeNumber", decree == null ? "" : decree);
+                                    result.put("decreeUrl", sourceUrl);
+                                    result.put("source", "Официальный интернет-портал правовой информации");
+                                    result.put("fetchedAt", new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US).format(new java.util.Date()));
+                                    String js = "window.onMoscowChildMinimumLoaded(" + JSONObject.quote(result.toString()) + ");";
+                                    webView.post(() -> webView.evaluateJavascript(js, null));
+                                    return;
+                                } catch (Exception inner) { lastError = inner; }
+                            }
+                        } catch (Exception outer) { lastError = outer; }
                     }
-                    if (amount <= 0) throw new IllegalStateException("На официальном портале не удалось распознать сумму для детей");
-
-                    String decree = extractDecreeNumber(plain);
-                    JSONObject result = new JSONObject();
-                    result.put("region", "Москва");
-                    result.put("year", year);
-                    result.put("amount", amount);
-                    result.put("decreeNumber", decree == null ? "" : decree);
-                    result.put("decreeUrl", sourceUrl);
-                    result.put("source", "Официальный портал Мэра и Правительства Москвы");
-                    result.put("fetchedAt", new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US).format(new java.util.Date()));
-                    String js = "window.onMoscowChildMinimumLoaded(" + JSONObject.quote(result.toString()) + ");";
-                    webView.post(() -> webView.evaluateJavascript(js, null));
+                    throw new IllegalStateException(lastError == null ? "Официальные данные не найдены" : lastError.getMessage());
                 } catch (Exception error) {
                     String message = error.getMessage() == null ? "Ошибка загрузки официальных данных" : error.getMessage();
                     String js = "window.onMoscowChildMinimumError(" + JSONObject.quote(message) + ");";
@@ -173,6 +180,17 @@ public class MainActivity extends Activity {
                 }
             }).start();
         }
+    }
+
+    private java.util.List<String> findOfficialDocumentUrls(String html, String baseUrl) {
+        java.util.LinkedHashSet<String> urls = new java.util.LinkedHashSet<>();
+        Pattern pattern = Pattern.compile("(?:href=)?[\\\"']([^\\\"']*(?:Document/View|document/view|Document\\?id=|/document/)[^\\\"']*)[\\\"']", Pattern.CASE_INSENSITIVE);
+        Matcher matcher = pattern.matcher(html);
+        while (matcher.find() && urls.size() < 8) {
+            String value = matcher.group(1).replace("&amp;", "&");
+            try { urls.add(new URL(new URL(baseUrl), value).toString()); } catch (Exception ignored) { }
+        }
+        return new java.util.ArrayList<>(urls);
     }
 
     private String readUrl(String urlText) throws Exception {
