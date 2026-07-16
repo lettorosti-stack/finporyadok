@@ -2076,7 +2076,7 @@ function showOperationDetails(id) {
   const receiptItemsHtml = Array.isArray(row.receipt?.items) && row.receipt.items.length
     ? `<section class="receipt-fiscal-card"><h3>Позиции чека</h3>${row.receipt.items.map((item) => `<div class="detail-row"><span>${escapeHtml(item.name || "Товар")}</span><strong>${money(Number(item.price) || 0)}</strong></div>`).join("")}</section>`
     : "";
-  byId("operationDetails").innerHTML = detailRows.map(([label, value]) => `<div class="detail-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("") + receiptItemsHtml;
+  byId("operationDetails").innerHTML = detailRows.map(([label, value]) => `<div class="detail-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("") + receiptItemsHtml + (row.receipt ? `<div class="receipt-actions"><button type="button" class="primary edit-receipt-operation" data-row-id="${escapeHtml(row.id)}">✏️ Изменить чек и позиции</button></div>` : "");
   byId("detailDialog").showModal();
 }
 
@@ -4066,7 +4066,49 @@ function parseFiscalReceiptQr(rawText) {
   return { raw, amount, date, time, fn, fd, fp, operationType, fiscalKey: [fn, fd, fp].filter(Boolean).join("-") };
 }
 
+
+function normalizedMerchantName(value) {
+  return String(value || "").toLowerCase().replace(/[«»"']/g, "").replace(/\s+/g, " ").trim();
+}
+
+function receiptMerchantProfiles() {
+  const byFn = new Map();
+  const names = new Map();
+  state.rows.forEach((row) => {
+    const merchant = String(row.payee || row.receipt?.merchant || "").trim();
+    if (!merchant || !row.receipt) return;
+    names.set(normalizedMerchantName(merchant), merchant);
+    if (row.receipt.fn) byFn.set(String(row.receipt.fn), merchant);
+  });
+  return { byFn, names };
+}
+
+function merchantForReceipt(receipt) {
+  if (!receipt) return "";
+  const profiles = receiptMerchantProfiles();
+  return profiles.byFn.get(String(receipt.fn || "")) || "";
+}
+
+function refreshReceiptMerchantSuggestions() {
+  const list = byId("receiptMerchantSuggestions");
+  if (!list) return;
+  const names = [...receiptMerchantProfiles().names.values()].sort((a, b) => a.localeCompare(b, "ru"));
+  list.innerHTML = names.map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
+}
+
+function parseReceiptMerchant(text) {
+  const lines = String(text || "").split(/\r?\n/).map((x) => x.replace(/\s+/g, " ").trim()).filter(Boolean);
+  for (const line of lines.slice(0, 12)) {
+    if (line.length < 3 || line.length > 80) continue;
+    if (/кассовый чек|приход|итого|инн|ккт|фн|фд|фп|смена|чек №|сайт фнс|налог|ндс|спасибо|добро пожаловать/i.test(line)) continue;
+    if (/^\d+[.,]?\d*\s*(₽|руб)?$/i.test(line)) continue;
+    if (/[А-ЯA-Z]{2,}|магазин|маркет|ооо|ип\s/i.test(line)) return line.replace(/^(?:магазин|продавец)\s*[:№-]?\s*/i, "").trim();
+  }
+  return "";
+}
+
 function receiptSelectOptions() {
+  refreshReceiptMerchantSuggestions();
   const accounts = [...new Set([
     ...state.rows.flatMap((row) => [row.account, row.from, row.to]),
     ...state.accounts.map((account) => account.name)
@@ -4097,25 +4139,62 @@ function updateReceiptPreview() {
   byId("receiptDatePreview").textContent = `${date}${time ? `, ${time}` : ""}`;
 }
 
-function openReceiptEditor(receipt) {
+function openReceiptEditor(receipt, existingRow = null) {
   receiptSelectOptions();
-  byId("receiptRawQr").value = receipt.raw;
-  byId("receiptFiscalKey").value = receipt.fiscalKey;
-  byId("receiptAmount").value = receipt.amount.toFixed(2);
-  byId("receiptDate").value = receipt.date;
-  byId("receiptTime").value = receipt.time;
-  byId("receiptFn").value = receipt.fn;
-  byId("receiptFd").value = receipt.fd;
-  byId("receiptFp").value = receipt.fp;
-  byId("receiptOperationType").value = receipt.operationType;
-  byId("receiptMerchant").value = "";
-  byId("receiptDescription").value = "Покупка по кассовому чеку";
+  byId("receiptRowId").value = existingRow?.id || "";
+  byId("receiptRawQr").value = receipt.raw || existingRow?.receipt?.rawQr || "";
+  byId("receiptFiscalKey").value = receipt.fiscalKey || existingRow?.receipt?.fiscalKey || "";
+  byId("receiptAmount").value = Math.abs(Number(existingRow?.amount ?? receipt.amount) || 0).toFixed(2);
+  byId("receiptDate").value = existingRow?.date || receipt.date || new Date().toISOString().slice(0, 10);
+  byId("receiptTime").value = existingRow?.time || receipt.time || "";
+  byId("receiptFn").value = receipt.fn || existingRow?.receipt?.fn || "";
+  byId("receiptFd").value = receipt.fd || existingRow?.receipt?.fd || "";
+  byId("receiptFp").value = receipt.fp || existingRow?.receipt?.fp || "";
+  byId("receiptOperationType").value = receipt.operationType || existingRow?.receipt?.operationType || "1";
+  const rememberedMerchant = existingRow?.payee || existingRow?.receipt?.merchant || merchantForReceipt(receipt);
+  byId("receiptMerchant").value = rememberedMerchant || "";
+  byId("receiptDescription").value = existingRow?.description || "Покупка по кассовому чеку";
+  if (existingRow?.account) byId("receiptAccount").value = existingRow.account;
+  if (existingRow?.category) byId("receiptCategory").value = existingRow.category;
+  if (existingRow?.project) byId("receiptProject").value = existingRow.project;
+  byId("receiptWorkExpense").checked = Boolean(existingRow?.workExpense);
   byId("receiptItems").innerHTML = "";
-  addReceiptItemRow();
+  const items = existingRow?.receipt?.items || [];
+  if (items.length) {
+    items.forEach((item) => {
+      addReceiptItemRow(item.name || "", item.price || "", item.qty || item.unitQty || 1, item.unit || item.unitName || "шт.");
+      const current = byId("receiptItems").lastElementChild;
+      if (current && item.canonicalName) current.querySelector(".receipt-item-card").value = item.canonicalName;
+    });
+  } else {
+    addReceiptItemRow();
+  }
   updateReceiptPreview();
-  byId("receiptStatus").textContent = "QR распознан. Укажите магазин и при необходимости позиции чека.";
+  const mode = existingRow ? "Редактирование чека" : "QR распознан";
+  const sellerNote = rememberedMerchant && !existingRow ? ` Продавец подставлен по ранее сохранённому чеку с тем же ФН: ${rememberedMerchant}.` : "";
+  byId("receiptStatus").textContent = `${mode}. Проверьте продавца и позиции.${sellerNote}`;
+  const submit = byId("receiptForm").querySelector('button[type="submit"]');
+  if (submit) submit.textContent = existingRow ? "Сохранить изменения" : "Добавить расход";
   byId("receiptDialog").showModal();
 }
+
+function editReceiptOperation(rowId) {
+  const row = state.rows.find((item) => String(item.id) === String(rowId));
+  if (!row?.receipt) return;
+  byId("detailDialog")?.close();
+  openReceiptEditor({
+    raw: row.receipt.rawQr || "",
+    fiscalKey: row.receipt.fiscalKey || "",
+    amount: Math.abs(Number(row.amount) || 0),
+    date: row.date,
+    time: row.time || "",
+    fn: row.receipt.fn || "",
+    fd: row.receipt.fd || "",
+    fp: row.receipt.fp || "",
+    operationType: row.receipt.operationType || "1"
+  }, row);
+}
+
 
 
 let pendingQrImageUrl = "";
@@ -4250,22 +4329,30 @@ byId("receiptForm")?.addEventListener("submit", (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.currentTarget).entries());
   const fiscalKey = data.fiscalKey;
-  if (state.rows.some((row) => row.receipt?.fiscalKey === fiscalKey)) {
+  const editingRowId = data.receiptRowId || "";
+  const duplicate = state.rows.find((row) => row.receipt?.fiscalKey === fiscalKey && String(row.id) !== String(editingRowId));
+  if (duplicate) {
     byId("receiptStatus").textContent = "Этот чек уже существует в приложении.";
     return;
   }
   const items = [...byId("receiptItems").querySelectorAll(".receipt-item")]
-    .map((item) => ({ name: item.querySelector(".receipt-item-name").value.trim(), price: Number(item.querySelector(".receipt-item-price").value) || 0 }))
+    .map((item) => {
+      const name = item.querySelector(".receipt-item-name").value.trim();
+      const qty = Math.max(0.001, Number(item.querySelector(".receipt-item-qty").value) || 1);
+      const unit = item.querySelector(".receipt-item-unit").value || "шт.";
+      const price = Number(item.querySelector(".receipt-item-price").value) || 0;
+      const canonicalName = item.querySelector(".receipt-item-card").value || name;
+      return { name, qty, unit, price, canonicalName };
+    })
     .filter((item) => item.name || item.price);
   const amount = Math.abs(Number(data.amount) || 0);
   if (!amount) return;
-  state.rows.push({
-    id: `receipt-${fiscalKey || Date.now()}`,
+  let savedReceiptRow = editingRowId ? state.rows.find((row) => String(row.id) === String(editingRowId)) : null;
+  const rowData = {
     date: data.date,
     time: data.time || "",
     description: data.description || data.merchant || "Покупка по кассовому чеку",
     amount: -amount,
-    balance: 0,
     category: data.category || "Без категории",
     account: data.account,
     payee: data.merchant,
@@ -4274,7 +4361,6 @@ byId("receiptForm")?.addEventListener("submit", (event) => {
     to: "",
     importSource: "Кассовый QR",
     workExpense: data.workExpense === "true",
-    workStatus: data.workExpense === "true" ? "new" : "",
     receipt: {
       fiscalKey,
       fn: data.fn,
@@ -4282,25 +4368,65 @@ byId("receiptForm")?.addEventListener("submit", (event) => {
       fp: data.fp,
       operationType: data.operationType,
       rawQr: data.rawQr,
+      merchant: data.merchant,
       items
     }
+  };
+  if (savedReceiptRow) {
+    Object.assign(savedReceiptRow, rowData);
+    if (savedReceiptRow.workExpense && !savedReceiptRow.workStatus) savedReceiptRow.workStatus = "new";
+    if (!savedReceiptRow.workExpense) savedReceiptRow.workStatus = "";
+  } else {
+    savedReceiptRow = {
+      id: `receipt-${fiscalKey || Date.now()}`,
+      balance: 0,
+      workStatus: rowData.workExpense ? "new" : "",
+      ...rowData
+    };
+    state.rows.push(savedReceiptRow);
+  }
+  state.shopping = state.shopping.filter((item) => String(item.sourceReceiptRowId || "") !== String(savedReceiptRow.id));
+  items.forEach((item, index) => {
+    const unitQty = Math.max(0.001, Number(item.qty) || 1);
+    state.shopping.unshift({
+      id: `receipt-item-${savedReceiptRow.id}-${index}`,
+      recordType: "purchase",
+      name: item.name,
+      canonicalName: item.canonicalName || item.name,
+      qty: `${unitQty} ${item.unit || "шт."}`,
+      unitQty,
+      unitName: item.unit || "шт.",
+      unitPrice: (Number(item.price) || 0) / unitQty,
+      price: Number(item.price) || 0,
+      store: data.merchant,
+      date: data.date,
+      sourceReceiptRowId: savedReceiptRow.id
+    });
   });
-  const savedReceiptRow = state.rows[0];
-  items.forEach((item,index)=>{ const unitQty=Math.max(0.001,Number(item.qty)||1); state.shopping.unshift({id:`receipt-item-${savedReceiptRow.id}-${index}`,recordType:"purchase",name:item.name,canonicalName:item.canonicalName||item.name,qty:`${unitQty} ${item.unit||"шт."}`,unitQty,unitName:item.unit||"шт.",unitPrice:(Number(item.price)||0)/unitQty,price:Number(item.price)||0,store:data.merchant,date:data.date,sourceReceiptRowId:savedReceiptRow.id}); });
-  state.importArchive.unshift({
-    id: `receipt-import-${Date.now()}`,
-    archivedAt: new Date().toISOString(),
-    source: `Кассовый QR: ${data.merchant}`,
-    reason: "Чек добавлен как расход",
-    existingId: "",
-    row: { date: data.date, description: data.description, amount: -amount, account: data.account, category: data.category }
-  });
+  if (!editingRowId) {
+    state.importArchive.unshift({
+      id: `receipt-import-${Date.now()}`,
+      archivedAt: new Date().toISOString(),
+      source: `Кассовый QR: ${data.merchant}`,
+      reason: "Чек добавлен как расход",
+      existingId: "",
+      row: { date: data.date, description: data.description, amount: -amount, account: data.account, category: data.category }
+    });
+  }
   ensureRowIds();
   saveState();
   byId("receiptDialog").close();
-  byId("importResult").textContent = `Чек добавлен: ${data.merchant}, ${money(amount)}.`;
+  byId("importResult").textContent = editingRowId
+    ? `Чек обновлён: ${data.merchant}, ${items.length} позиций.`
+    : `Чек добавлен: ${data.merchant}, ${money(amount)}.`;
   render();
 });
+
+byId("operationDetails")?.addEventListener("click", (event) => {
+  const button = event.target.closest(".edit-receipt-operation");
+  if (button) editReceiptOperation(button.dataset.rowId);
+});
+
 
 
 // ===== Package 3: smart shopping and receipt positions =====
@@ -4309,7 +4435,7 @@ byId('shoppingCatalog')?.addEventListener('click',e=>{const c=e.target.closest('
 byId('purchasePredictions')?.addEventListener('click',e=>{const c=e.target.closest('[data-product-key]');if(c)openProductDetails(c.dataset.productKey);});
 byId('productDetailsBody')?.addEventListener('click',e=>{const b=e.target.closest('.add-product-to-list');if(!b)return;const p=productCatalog().find(x=>x.key===b.dataset.productKey);if(!p)return;state.shopping.unshift({id:`shopping-plan-${Date.now()}`,recordType:'planned',name:p.name,canonicalName:p.name,qty:p.last.qty||'1 шт.',store:p.storeStats[0]?.store||p.last.store||'',price:Number(p.last.price)||0,date:p.nextDate,checked:false});saveState();byId('productDetailsDialog').close();renderShopping();});
 function parseReceiptTextLines(text){const lines=String(text||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const out=[];for(let i=0;i<lines.length;i++){const line=lines[i].replace(/\s+/g,' ');const m=line.match(/^(.{2,}?)\s+(\d+[.,]\d{2})\s*(?:₽|руб)?$/i);if(m&&!/итого|сумма|налог|скидка|всего/i.test(m[1]))out.push({name:m[1].trim(),price:Number(m[2].replace(',','.'))});}return out.slice(0,80);}
-window.onNativeReceiptTextRecognized=function(text){const items=parseReceiptTextLines(text);if(!items.length){byId('paperReceiptStatus').textContent='Текст распознан, но позиции не найдены. Проверьте фото или добавьте позиции вручную.';return;}byId('receiptItems').innerHTML='';items.forEach(i=>addReceiptItemRow(i.name,i.price));byId('paperReceiptDialog')?.close();byId('receiptStatus').textContent=`Распознано позиций: ${items.length}. Проверьте названия, количество и цену.`;byId('receiptDialog').showModal();};
+window.onNativeReceiptTextRecognized=function(text){const items=parseReceiptTextLines(text);const merchant=parseReceiptMerchant(text);if(merchant&&!byId('receiptMerchant').value.trim())byId('receiptMerchant').value=merchant;if(!items.length){byId('paperReceiptStatus').textContent='Текст распознан, но позиции не найдены. Проверьте фото или добавьте позиции вручную.';return;}byId('receiptItems').innerHTML='';items.forEach(i=>addReceiptItemRow(i.name,i.price));byId('paperReceiptDialog')?.close();byId('receiptStatus').textContent=`Распознано позиций: ${items.length}. ${merchant?'Продавец: '+merchant+'. ':''}Проверьте названия, количество и цену.`;byId('receiptDialog').showModal();};
 window.onNativeReceiptTextError=function(message){byId('paperReceiptStatus').textContent=message||'Не удалось распознать чек.';};
 byId('scanPaperReceiptBtn')?.addEventListener('click',()=>byId('paperReceiptInput')?.click());
 byId('paperReceiptInput')?.addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;byId('paperReceiptStatus').textContent='Распознаю позиции чека…';try{const data=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',').pop());r.onerror=rej;r.readAsDataURL(file);});if(window.AndroidReceiptOcr?.recognizeBase64){window.AndroidReceiptOcr.recognizeBase64(data);}else throw new Error('Распознавание доступно в Android-приложении.');}catch(err){byId('paperReceiptStatus').textContent=err.message||String(err);}});

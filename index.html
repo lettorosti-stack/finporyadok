@@ -696,9 +696,10 @@
 <div><span>Сумма</span><strong id="receiptAmountPreview">0 ₽</strong></div>
 <div><span>Дата и время</span><strong id="receiptDatePreview">—</strong></div>
 </div>
+<input id="receiptRowId" name="receiptRowId" type="hidden"/>
 <input id="receiptRawQr" name="rawQr" type="hidden"/>
 <input id="receiptFiscalKey" name="fiscalKey" type="hidden"/>
-<label>Магазин или продавец<input id="receiptMerchant" name="merchant" placeholder="Например, Пятёрочка" required=""/></label>
+<label>Магазин или продавец<input id="receiptMerchant" name="merchant" list="receiptMerchantSuggestions" placeholder="Например, Пятёрочка" required=""/><datalist id="receiptMerchantSuggestions"></datalist><small class="field-hint">При повторном чеке продавец подставится автоматически, когда совпадёт номер ФН.</small></label>
 <label>Описание операции<input id="receiptDescription" name="description" required="" value="Покупка по кассовому чеку"/></label>
 <label>Сумма<input id="receiptAmount" min="0.01" name="amount" required="" step="0.01" type="number"/></label>
 <label>Дата<input id="receiptDate" name="date" required="" type="date"/></label>
