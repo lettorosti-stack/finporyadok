@@ -12,6 +12,7 @@ const state = {
   importArchive: savedState.importArchive,
   financialProducts: Array.isArray(savedState.financialProducts) ? savedState.financialProducts : [],
   insurancePolicies: Array.isArray(savedState.insurancePolicies) ? savedState.insurancePolicies : [],
+  alimonyRules: Array.isArray(savedState.alimonyRules) ? savedState.alimonyRules : [],
   shopping: savedState.shopping.length ? savedState.shopping : [
     { name: "Молоко", qty: "2 л", days: 4, price: 92 },
     { name: "Корм", qty: "3 кг", days: 26, price: 1450 },
@@ -28,6 +29,7 @@ const transactionPage = {
 const views = {
   dashboard: ["Главная", "Сводка по счетам, операциям и обязательствам."],
   transactions: ["Операции", "Поиск, фильтры и проверка импортированных данных."],
+  reimbursements: ["Возмещение", "Рабочие расходы, авансовые отчёты и фактические компенсации."],
   accounts: ["Счета", "Последние остатки и активность по каждому счету."],
   budgets: ["Категории", "Отдельные справочники категорий расходов и доходов."],
   "finance-products": ["Вклады и кредиты", "Проценты, платежи и итоговые суммы по финансовым продуктам."],
@@ -49,10 +51,11 @@ function loadState() {
       importArchive: Array.isArray(saved?.importArchive) ? saved.importArchive : [],
       shopping: Array.isArray(saved?.shopping) ? saved.shopping : [],
       financialProducts: Array.isArray(saved?.financialProducts) ? saved.financialProducts : [],
-      insurancePolicies: Array.isArray(saved?.insurancePolicies) ? saved.insurancePolicies : []
+      insurancePolicies: Array.isArray(saved?.insurancePolicies) ? saved.insurancePolicies : [],
+      alimonyRules: Array.isArray(saved?.alimonyRules) ? saved.alimonyRules : []
     };
   } catch {}
-  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], financialProducts: [], insurancePolicies: [] };
+  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], financialProducts: [], insurancePolicies: [], alimonyRules: [] };
 }
 
 function saveState() {
@@ -66,7 +69,8 @@ function saveState() {
     importArchive: state.importArchive,
     shopping: state.shopping,
     financialProducts: state.financialProducts,
-    insurancePolicies: state.insurancePolicies
+    insurancePolicies: state.insurancePolicies,
+    alimonyRules: state.alimonyRules
   }));
   localStorage.setItem(`${storeKey}.lastSavedAt`, savedAt);
   updateDatabaseStatus();
@@ -552,34 +556,89 @@ function renderInsuranceAlerts() {
     : `<article class="empty-state"><strong>Всё спокойно</strong><p>На ближайшие 7 дней нет страховок, которые заканчиваются без продления.</p></article>`;
 }
 
-function workExpenseRows() {
+const workStatusLabels = {
+  new: "Новый расход", prepared: "Подготовлен к отчёту", submitted: "Передан работодателю",
+  partial: "Частично возмещён", reimbursed: "Полностью возмещён", rejected: "Отказано"
+};
+
+function normalizeWorkExpense(row) {
+  if (!row.workExpense) return row;
+  row.workStatus = row.workStatus || "new";
+  row.reimbursedAmount = Math.max(0, Number(row.reimbursedAmount) || 0);
+  row.employer = row.employer || "";
+  row.workProject = row.workProject || row.project || "";
+  return row;
+}
+
+function workExpenseRows(includeClosed = true) {
   return state.rows
-    .filter((row) => row.workExpense && row.amount < 0 && typeOf(row) !== 'transfer')
-    .sort((a, b) => `${b.date} ${b.time || ''}`.localeCompare(`${a.date} ${a.time || ''}`));
+    .filter((row) => row.workExpense && row.amount < 0 && typeOf(row) !== "transfer")
+    .map(normalizeWorkExpense)
+    .filter((row) => includeClosed || !["reimbursed", "rejected"].includes(row.workStatus))
+    .sort((a, b) => `${b.date} ${b.time || ""}`.localeCompare(`${a.date} ${a.time || ""}`));
+}
+
+function workExpenseAmount(row) { return Math.abs(Number(row.amount) || 0); }
+function workExpenseOutstanding(row) {
+  if (row.workStatus === "rejected") return 0;
+  return Math.max(0, workExpenseAmount(row) - (Number(row.reimbursedAmount) || 0));
 }
 
 function renderWorkReimbursement() {
-  const rows = workExpenseRows();
-  const total = rows.reduce((sum, row) => sum + Math.abs(Number(row.amount) || 0), 0);
-  if (byId('workReimbursementTotal')) byId('workReimbursementTotal').textContent = money(total);
-  const target = byId('workReimbursementPreview');
+  const rows = workExpenseRows(false);
+  const total = rows.reduce((sum, row) => sum + workExpenseOutstanding(row), 0);
+  if (byId("workReimbursementTotal")) byId("workReimbursementTotal").textContent = money(total);
+  const target = byId("workReimbursementPreview");
   if (!target) return;
   target.innerHTML = rows.length
-    ? rows.slice(0, 4).map((row) => `<article class="reimbursement-row" data-row-id="${escapeHtml(row.id)}" tabindex="0"><div><strong>${escapeHtml(row.description || row.payee || 'Рабочая покупка')}</strong><small>${escapeHtml(formatTransactionDate(row.date))} • ${escapeHtml(row.account || 'Без счёта')} • ${escapeHtml(categoryRoot(row))}</small></div><b>${money(Math.abs(Number(row.amount) || 0))}</b></article>`).join('')
-    : `<article class="empty-state"><strong>Рабочих расходов нет</strong><p>Отметьте галочку в покупке или кассовом чеке.</p></article>`;
+    ? rows.slice(0, 4).map((row) => `<article class="reimbursement-row" data-row-id="${escapeHtml(row.id)}" tabindex="0"><div><strong>${escapeHtml(row.description || row.payee || "Рабочая покупка")}</strong><small>${escapeHtml(workStatusLabels[row.workStatus])} • ${escapeHtml(formatTransactionDate(row.date))}</small></div><b>${money(workExpenseOutstanding(row))}</b></article>`).join("")
+    : `<article class="empty-state"><strong>Нет расходов к возмещению</strong><p>Все рабочие расходы закрыты или ещё не добавлены.</p></article>`;
+}
+
+function filteredWorkExpenses() {
+  const status = byId("workStatusFilter")?.value || "all";
+  const period = byId("workPeriodFilter")?.value || "month";
+  const query = (byId("workEmployerFilter")?.value || "").trim().toLowerCase();
+  const range = period === "all" ? null : periodRangeByValue(period);
+  return workExpenseRows(true).filter((row) => {
+    const date = rowDate(row);
+    const hay = `${row.employer} ${row.workProject} ${row.project} ${row.description}`.toLowerCase();
+    return (status === "all" || row.workStatus === status) && (!query || hay.includes(query)) && (!range || (date && date >= range.start && date <= range.end));
+  });
+}
+
+function workExpenseCard(row) {
+  const amount = workExpenseAmount(row), reimbursed = Number(row.reimbursedAmount) || 0, outstanding = workExpenseOutstanding(row);
+  return `<article class="work-expense-card" data-work-row-id="${escapeHtml(row.id)}" tabindex="0">
+    <div class="work-expense-card-head"><div><span class="work-status work-status--${row.workStatus}">${escapeHtml(workStatusLabels[row.workStatus])}</span><h3>${escapeHtml(row.description || row.payee || "Рабочий расход")}</h3><p>${escapeHtml(formatTransactionDate(row.date))} • ${escapeHtml(row.employer || "Работодатель не указан")} • ${escapeHtml(row.workProject || row.project || "Без проекта")}</p></div><strong>${money(amount)}</strong></div>
+    <div class="work-expense-progress"><div><span>Возмещено</span><b>${money(reimbursed)}</b></div><div><span>Осталось</span><b>${money(outstanding)}</b></div></div>
+    ${row.reportNumber ? `<small>Авансовый отчёт: ${escapeHtml(row.reportNumber)}</small>` : ""}
+  </article>`;
+}
+
+function renderWorkExpenseCenter() {
+  const all = workExpenseRows(true), filtered = filteredWorkExpenses();
+  const allTotal = all.reduce((s,r)=>s+workExpenseAmount(r),0);
+  const outstanding = all.reduce((s,r)=>s+workExpenseOutstanding(r),0);
+  const submitted = all.filter(r=>["submitted","partial"].includes(r.workStatus)).reduce((s,r)=>s+workExpenseOutstanding(r),0);
+  const reimbursed = all.reduce((s,r)=>s+(Number(r.reimbursedAmount)||0),0);
+  if(byId("workAllTotal")) byId("workAllTotal").textContent=money(allTotal);
+  if(byId("workAllCount")) byId("workAllCount").textContent=`${all.length} операций`;
+  if(byId("workOutstandingTotal")) byId("workOutstandingTotal").textContent=money(outstanding);
+  if(byId("workSubmittedTotal")) byId("workSubmittedTotal").textContent=money(submitted);
+  if(byId("workReimbursedTotal")) byId("workReimbursedTotal").textContent=money(reimbursed);
+  if(byId("workFilteredCount")) byId("workFilteredCount").textContent=filtered.length;
+  if(byId("workExpenseList")) byId("workExpenseList").innerHTML=filtered.length?filtered.map(workExpenseCard).join(""):`<article class="empty-state"><strong>Ничего не найдено</strong><p>Измените фильтры.</p></article>`;
 }
 
 function appNotificationCount() {
-  return insuranceReminderPolicies().length + workExpenseRows().length;
+  return insuranceReminderPolicies().length + workExpenseRows(false).length;
 }
 
 function renderNotificationCenterBadge() {
-  const badge = byId('notificationBadge');
-  if (!badge) return;
-  const count = appNotificationCount();
-  badge.textContent = count;
-  badge.hidden = count === 0;
-  byId('notificationCenterBtn')?.classList.toggle('has-notifications', count > 0);
+  const badge = byId("notificationBadge"); if (!badge) return;
+  const count = appNotificationCount(); badge.textContent = count; badge.hidden = count === 0;
+  byId("notificationCenterBtn")?.classList.toggle("has-notifications", count > 0);
 }
 
 function render() {
@@ -587,6 +646,7 @@ function render() {
   renderFilters();
   renderDashboard();
   renderTransactions();
+  renderWorkExpenseCenter();
   renderAccounts();
   renderBudgets();
   renderFinanceProducts();
@@ -776,7 +836,7 @@ function transactionCardTemplate(row) {
       </div>
       <div class="transaction-card-tags transaction-card-tags--text">
         <span class="soft-pill">${escapeHtml(categoryName)}</span>
-        ${row.workExpense ? `<span class="soft-pill work-expense-pill">Работа · к возмещению</span>` : ""}
+        ${row.workExpense ? `<span class="soft-pill work-expense-pill">Работа · ${escapeHtml(workStatusLabels[normalizeWorkExpense(row).workStatus])}</span>` : ""}
         ${row.payee ? `<span class="soft-pill">${escapeHtml(row.payee)}</span>` : ""}
         ${row.project ? `<span class="soft-pill">${escapeHtml(row.project)}</span>` : ""}
       </div>
@@ -1341,13 +1401,44 @@ function addInsuranceExpense(policy) {
   state.rows.push(row);
 }
 
-function renderAlimony() {
-  const rows = state.rows.filter((row) => /алим/i.test(`${row.project} ${row.category} ${row.description}`));
-  const total = rows.reduce((sum, row) => sum + Math.abs(row.amount), 0);
-  byId("alimonyTotal").textContent = money(total);
-  byId("alimonyCount").textContent = rows.length;
-  byId("alimonyRows").innerHTML = rows.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 100).map((row) => `<tr><td>${escapeHtml(row.date)}</td><td>${escapeHtml(row.description)}</td><td>${categoryPill(row.category)}</td><td>${accountPill(row.account)}</td><td class="amount ${row.amount >= 0 ? "good" : "bad"}">${money(row.amount)}</td></tr>`).join("");
+function monthKey(date) { return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}`; }
+function monthDate(key) { return new Date(`${key}-01T00:00:00`); }
+function alimonyRulesSorted() { return [...state.alimonyRules].sort((a,b)=>a.effectiveFrom.localeCompare(b.effectiveFrom)); }
+function alimonyRuleForMonth(key) { return alimonyRulesSorted().filter(r=>r.effectiveFrom<=key).at(-1) || null; }
+function alimonyPaymentRows() {
+  return state.rows.filter(row => row.alimonyPayment || (row.amount>0 && /алим/i.test(`${row.project} ${row.category} ${row.description}`))).map(row=>({ ...row, paymentStatus: row.paymentStatus || "confirmed", payerName: row.payerName || (row.alimonyPayment ? "Должник" : row.payee || "Не указан") }));
 }
+function confirmedAlimonyPayments() { return alimonyPaymentRows().filter(r=>r.paymentStatus==="confirmed"); }
+function buildAlimonyLedger() {
+  const rules=alimonyRulesSorted(); if(!rules.length) return [];
+  const start=monthDate(rules[0].effectiveFrom); const end=latestAvailableDate(); end.setDate(1);
+  const payments=confirmedAlimonyPayments(); const rows=[]; let carry=Number(rules[0].openingDebt)||0;
+  for(let d=new Date(start); d<=end; d.setMonth(d.getMonth()+1)){
+    const key=monthKey(d), rule=alimonyRuleForMonth(key); if(!rule) continue;
+    const accrued=(Number(rule.childrenCount)||1)*(Number(rule.amountPerChild)||0);
+    const paid=payments.filter(p=>String(p.date||"").slice(0,7)===key).reduce((s,p)=>s+Math.max(0,Number(p.amount)||0),0);
+    carry += accrued-paid;
+    rows.push({key, accrued, paid, balance:carry, rule});
+  }
+  return rows;
+}
+function renderAlimony() {
+  const ledger=buildAlimonyLedger(), rules=alimonyRulesSorted(), payments=alimonyPaymentRows().sort((a,b)=>b.date.localeCompare(a.date));
+  const accrued=ledger.reduce((s,m)=>s+m.accrued,0), paid=confirmedAlimonyPayments().reduce((s,r)=>s+Math.max(0,Number(r.amount)||0),0);
+  const opening=Number(rules[0]?.openingDebt)||0, rawDebt=opening+accrued-paid, debt=Math.max(0,rawDebt), over=Math.max(0,-rawDebt);
+  if(byId("alimonyAccruedTotal")) byId("alimonyAccruedTotal").textContent=money(accrued);
+  if(byId("alimonyAccruedMeta")) byId("alimonyAccruedMeta").textContent=`${ledger.length} месяцев`;
+  if(byId("alimonyPaidTotal")) byId("alimonyPaidTotal").textContent=money(paid);
+  if(byId("alimonyPaidMeta")) byId("alimonyPaidMeta").textContent=`${confirmedAlimonyPayments().length} подтверждённых платежей`;
+  if(byId("alimonyDebtTotal")) byId("alimonyDebtTotal").textContent=money(debt);
+  if(byId("alimonyOpeningDebtMeta")) byId("alimonyOpeningDebtMeta").textContent=`начальный долг ${money(opening)}`;
+  if(byId("alimonyOverpaymentTotal")) byId("alimonyOverpaymentTotal").textContent=money(over);
+  if(byId("alimonyPaymentCount")) byId("alimonyPaymentCount").textContent=payments.length;
+  if(byId("alimonyRules")) byId("alimonyRules").innerHTML=rules.length?rules.map(rule=>`<article class="alimony-rule-card"><div><strong>С ${escapeHtml(rule.effectiveFrom)}</strong><small>${rule.childrenCount} детей × ${money(rule.amountPerChild)} в месяц</small><p>${escapeHtml(rule.basis||"Основание не указано")}</p></div><button class="icon-button delete-alimony-rule" data-rule-id="${escapeHtml(rule.id)}">×</button></article>`).join(""):`<article class="empty-state"><strong>Нет правил начисления</strong><p>Добавьте размер алиментов и дату начала.</p></article>`;
+  if(byId("alimonyMonthLedger")) byId("alimonyMonthLedger").innerHTML=ledger.length?[...ledger].reverse().slice(0,36).map(m=>`<article class="alimony-month-row"><div><strong>${monthDate(m.key).toLocaleDateString("ru-RU",{month:"long",year:"numeric"})}</strong><small>Начислено ${money(m.accrued)} • Оплачено ${money(m.paid)}</small></div><b class="${m.balance>0?'bad':'good'}">${m.balance>0?`Долг ${money(m.balance)}`:`Переплата ${money(Math.abs(m.balance))}`}</b></article>`).join(""):`<article class="empty-state"><strong>Расчёт пока пуст</strong><p>Добавьте правило начисления.</p></article>`;
+  if(byId("alimonyRows")) byId("alimonyRows").innerHTML=payments.length?payments.slice(0,100).map(row=>`<tr><td>${escapeHtml(row.date)}</td><td>${escapeHtml(row.payerName||"Не указан")}</td><td>${escapeHtml(row.description||"Алименты")}</td><td>${accountPill(row.account)}</td><td>${escapeHtml(row.paymentStatus==="confirmed"?"Подтверждён":row.paymentStatus==="unidentified"?"Неопознанный":"Спорный")}</td><td class="amount good">${money(row.amount)}</td></tr>`).join(""):`<tr><td colspan="6">Поступлений пока нет</td></tr>`;
+}
+
 
 function renderShopping() {
   byId("shoppingList").innerHTML = state.shopping.map((item) => shoppingRow(item)).join("");
@@ -1809,6 +1900,8 @@ function setView(id) {
   byId("pageTitle").textContent = views[id]?.[0] || "ФинПорядок";
   byId("pageSubtitle").textContent = views[id]?.[1] || "";
   if (id === "transactions") renderTransactions({ reset: true });
+  if (id === "reimbursements") renderWorkExpenseCenter();
+  if (id === "alimony") renderAlimony();
   if (id === "reports") renderReports();
 }
 
@@ -2738,7 +2831,7 @@ byId("txForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.currentTarget).entries());
   const signedAmount = data.txType === "income" ? Math.abs(Number(data.amount)) : data.txType === "transfer" ? 0 : -Math.abs(Number(data.amount));
-  state.rows.push({ id: `manual-${Date.now()}`, date: data.date, description: data.description, amount: signedAmount, balance: 0, category: data.category, account: data.account, payee: "", project: data.project || categoryMeta(data.category).project || "", from: signedAmount < 0 || data.txType === "transfer" ? data.account : "", to: signedAmount >= 0 ? data.account : "", workExpense: data.txType === "expense" && data.workExpense === "true" });
+  state.rows.push({ id: `manual-${Date.now()}`, date: data.date, description: data.description, amount: signedAmount, balance: 0, category: data.category, account: data.account, payee: "", project: data.project || categoryMeta(data.category).project || "", from: signedAmount < 0 || data.txType === "transfer" ? data.account : "", to: signedAmount >= 0 ? data.account : "", workExpense: data.txType === "expense" && data.workExpense === "true", workStatus: data.txType === "expense" && data.workExpense === "true" ? "new" : "" });
   saveRows();
   byId("txDialog").close();
   render();
@@ -2896,6 +2989,27 @@ document.addEventListener("click", async (event) => {
   }
 });
 
+let activeWorkExpenseRowId = null;
+function openWorkExpenseDialog(rowId) {
+  const row=state.rows.find(r=>r.id===rowId); if(!row) return; normalizeWorkExpense(row); activeWorkExpenseRowId=rowId;
+  const form=byId("workExpenseForm"); form.elements.rowId.value=row.id; form.elements.workStatus.value=row.workStatus; form.elements.employer.value=row.employer||""; form.elements.workProject.value=row.workProject||row.project||""; form.elements.reportNumber.value=row.reportNumber||""; form.elements.submittedDate.value=row.submittedDate||""; form.elements.reimbursedAmount.value=Number(row.reimbursedAmount)||0; form.elements.reimbursedDate.value=row.reimbursedDate||""; form.elements.workComment.value=row.workComment||"";
+  byId("workExpenseDialogSubtitle").textContent=`${row.description||"Рабочий расход"} • ${money(workExpenseAmount(row))}`; updateWorkExpenseCalculation(); byId("workExpenseDialog").showModal();
+}
+function updateWorkExpenseCalculation(){ const row=state.rows.find(r=>r.id===activeWorkExpenseRowId); if(!row)return; const reimb=Math.max(0,Number(byId("workExpenseForm").elements.reimbursedAmount.value)||0); const rest=Math.max(0,workExpenseAmount(row)-reimb); byId("workExpenseCalculation").innerHTML=`<div><span>Сумма расхода</span><strong>${money(workExpenseAmount(row))}</strong></div><div><span>Возмещено</span><strong>${money(reimb)}</strong></div><div><span>Осталось</span><strong>${money(rest)}</strong></div>`; }
+byId("workExpenseForm")?.addEventListener("input",updateWorkExpenseCalculation);
+byId("workExpenseForm")?.addEventListener("submit",event=>{event.preventDefault();const row=state.rows.find(r=>r.id===activeWorkExpenseRowId);if(!row)return;const d=Object.fromEntries(new FormData(event.currentTarget).entries());row.workStatus=d.workStatus;row.employer=d.employer.trim();row.workProject=d.workProject.trim();row.reportNumber=d.reportNumber.trim();row.submittedDate=d.submittedDate;row.reimbursedAmount=Math.min(workExpenseAmount(row),Math.max(0,Number(d.reimbursedAmount)||0));row.reimbursedDate=d.reimbursedDate;row.workComment=d.workComment.trim();if(row.reimbursedAmount>=workExpenseAmount(row)&&row.workStatus!=="rejected")row.workStatus="reimbursed";else if(row.reimbursedAmount>0&&row.workStatus!=="rejected")row.workStatus="partial";saveState();byId("workExpenseDialog").close();render();setView("reimbursements");});
+document.addEventListener("click",event=>{const card=event.target.closest("[data-work-row-id]");if(card)openWorkExpenseDialog(card.dataset.workRowId);const preview=event.target.closest(".reimbursement-row");if(preview)openWorkExpenseDialog(preview.dataset.rowId);});
+["workStatusFilter","workPeriodFilter","workEmployerFilter"].forEach(id=>byId(id)?.addEventListener("input",renderWorkExpenseCenter));
+byId("workClearFilters")?.addEventListener("click",()=>{byId("workStatusFilter").value="all";byId("workPeriodFilter").value="month";byId("workEmployerFilter").value="";renderWorkExpenseCenter();});
+byId("openWorkExpensesBtn")?.addEventListener("click",()=>setView("reimbursements"));
+byId("exportWorkReportBtn")?.addEventListener("click",()=>{const rows=filteredWorkExpenses();const cols=[["Дата","Описание","Работодатель","Проект","Статус","Расход","Возмещено","Остаток","Авансовый отчёт"],...rows.map(r=>[r.date,r.description,r.employer||"",r.workProject||r.project||"",workStatusLabels[r.workStatus],workExpenseAmount(r),Number(r.reimbursedAmount)||0,workExpenseOutstanding(r),r.reportNumber||""])];const csv="\ufeff"+cols.map(row=>row.map(v=>`"${String(v??"").replaceAll('"','""')}"`).join(";")).join("\n");downloadTextFile(`work-expenses-${new Date().toISOString().slice(0,10)}.csv`,csv,"text/csv;charset=utf-8");});
+
+byId("addAlimonyRuleBtn")?.addEventListener("click",()=>{const f=byId("alimonyRuleForm");f.reset();f.elements.effectiveFrom.value=new Date().toISOString().slice(0,7);f.elements.childrenCount.value=2;f.elements.openingDebt.value=state.alimonyRules.length?0:"";byId("alimonyRuleDialog").showModal();});
+byId("alimonyRuleForm")?.addEventListener("submit",event=>{event.preventDefault();const d=Object.fromEntries(new FormData(event.currentTarget).entries());state.alimonyRules.push({id:`alimony-rule-${Date.now()}`,effectiveFrom:d.effectiveFrom,childrenCount:Number(d.childrenCount)||1,amountPerChild:Number(d.amountPerChild)||0,openingDebt:Number(d.openingDebt)||0,basis:d.basis.trim()});saveState();byId("alimonyRuleDialog").close();renderAlimony();});
+byId("addAlimonyPaymentBtn")?.addEventListener("click",()=>{const f=byId("alimonyPaymentForm");f.reset();f.elements.date.value=new Date().toISOString().slice(0,10);populateAccountSelect();byId("alimonyAccountSelect").innerHTML=byId("txAccountSelect").innerHTML;byId("alimonyPaymentDialog").showModal();});
+byId("alimonyPaymentForm")?.addEventListener("submit",event=>{event.preventDefault();const d=Object.fromEntries(new FormData(event.currentTarget).entries());state.rows.push({id:`alimony-payment-${Date.now()}`,date:d.date,time:"12:00",description:d.description||"Алименты",amount:Math.abs(Number(d.amount)||0),balance:0,category:"Алименты",account:d.account,to:d.account,from:"",project:"Алименты",payee:d.payerName||"",payerName:d.payerName||"",payerType:d.payerType,paymentStatus:d.paymentStatus,comment:d.comment||"",alimonyPayment:true});saveState();byId("alimonyPaymentDialog").close();render();setView("alimony");});
+document.addEventListener("click",event=>{const b=event.target.closest(".delete-alimony-rule");if(!b)return;state.alimonyRules=state.alimonyRules.filter(r=>r.id!==b.dataset.ruleId);saveState();renderAlimony();});
+
 byId("addFinanceProductBtn")?.addEventListener("click", () => {
   populateFinanceCategorySelects();
   byId("financeProductForm").reset();
@@ -2990,7 +3104,8 @@ function buildBackupPayload() {
       importArchive: state.importArchive,
       shopping: state.shopping,
       financialProducts: state.financialProducts,
-      insurancePolicies: state.insurancePolicies
+      insurancePolicies: state.insurancePolicies,
+      alimonyRules: state.alimonyRules
     }
   };
 }
@@ -3099,7 +3214,8 @@ function normalizeBackupPayload(parsed) {
     importArchive: Array.isArray(data.importArchive) ? data.importArchive : [],
     shopping: Array.isArray(data.shopping) ? data.shopping : [],
     financialProducts: Array.isArray(data.financialProducts) ? data.financialProducts : [],
-    insurancePolicies: Array.isArray(data.insurancePolicies) ? data.insurancePolicies : []
+    insurancePolicies: Array.isArray(data.insurancePolicies) ? data.insurancePolicies : [],
+    alimonyRules: Array.isArray(data.alimonyRules) ? data.alimonyRules : []
   };
 }
 
@@ -3131,6 +3247,7 @@ function applyBackup(mode) {
     state.shopping = pendingBackupRestore.shopping;
     state.financialProducts = pendingBackupRestore.financialProducts;
     state.insurancePolicies = pendingBackupRestore.insurancePolicies;
+    state.alimonyRules = pendingBackupRestore.alimonyRules;
   } else {
     state.rows = mergeUnique(state.rows, pendingBackupRestore.rows, backupRowKey);
     state.accounts = mergeUnique(state.accounts, pendingBackupRestore.accounts, (item) => item.id || item.name);
@@ -3139,6 +3256,7 @@ function applyBackup(mode) {
     state.shopping = mergeUnique(state.shopping, pendingBackupRestore.shopping, (item) => item.id || `${item.name}|${item.date}`);
     state.financialProducts = mergeUnique(state.financialProducts, pendingBackupRestore.financialProducts, (item) => item.id || `${item.type}|${item.name}|${item.startDate}`);
     state.insurancePolicies = mergeUnique(state.insurancePolicies, pendingBackupRestore.insurancePolicies, (item) => item.id || `${item.policyNumber}|${item.name}|${item.startDate}`);
+    state.alimonyRules = mergeUnique(state.alimonyRules, pendingBackupRestore.alimonyRules, (item) => item.id || `${item.effectiveFrom}|${item.amountPerChild}`);
   }
   ensureRowIds();
   saveState();
@@ -3169,6 +3287,7 @@ byId("backupRestoreInput")?.addEventListener("change", async (event) => {
       <div><span>Покупки</span><strong>${pendingBackupRestore.shopping.length}</strong></div>
       <div><span>Вклады и кредиты</span><strong>${pendingBackupRestore.financialProducts.length}</strong></div>
       <div><span>Страховки</span><strong>${pendingBackupRestore.insurancePolicies.length}</strong></div>
+      <div><span>Правила алиментов</span><strong>${pendingBackupRestore.alimonyRules.length}</strong></div>
     `;
     byId("restoreDialog").showModal();
   } catch (error) {
@@ -3534,6 +3653,7 @@ byId("receiptForm")?.addEventListener("submit", (event) => {
     to: "",
     importSource: "Кассовый QR",
     workExpense: data.workExpense === "true",
+    workStatus: data.workExpense === "true" ? "new" : "",
     receipt: {
       fiscalKey,
       fn: data.fn,
