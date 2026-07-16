@@ -1,4 +1,7 @@
-const storeKey = "finporyadok.state.v2";
+const storeKey = "finporyadok.state.alzex.v1";
+["finporyadok.state.v2", "finporyadok.state.v3"].forEach((legacyKey) => {
+  try { localStorage.removeItem(legacyKey); } catch {}
+});
 const seedRows = window.ANDROMONEY_DATA?.rows || [];
 const savedState = loadState();
 
