@@ -534,14 +534,40 @@ function filteredRows() {
   });
 }
 
+function transactionCardTemplate(row) {
+  const kind = typeOf(row);
+  const amountValue = kind === "transfer" ? Math.abs(Number(row.transferAmount || 0)) : Number(row.amount || 0);
+  const amountClass = kind === "transfer" ? "transfer-amount" : amountValue >= 0 ? "good" : "bad";
+  const typeLabel = kind === "transfer" ? "Перевод" : kind === "income" ? "Доход" : "Расход";
+  const accountText = kind === "transfer"
+    ? `${row.from || row.account || "Счёт"} → ${row.to || "Счёт"}`
+    : row.account || "Без счёта";
+  return `<article class="transaction-card" data-row-id="${escapeHtml(row.id)}" tabindex="0">
+    <div class="transaction-card-icon">${categoryIcon(row.category)}</div>
+    <div class="transaction-card-main">
+      <div class="transaction-card-top"><strong>${escapeHtml(row.description || row.payee || "Операция")}</strong><b class="transaction-card-amount ${amountClass}">${kind === "transfer" ? money(amountValue) : money(amountValue)}</b></div>
+      <div class="transaction-card-meta"><span>${escapeHtml(formatTransactionDate(row.date))}</span><span>${escapeHtml(typeLabel)}</span><span>${escapeHtml(accountText)}</span></div>
+      <div class="transaction-card-tags">${categoryPill(row.category)}${row.payee ? `<span class="soft-pill">${escapeHtml(row.payee)}</span>` : ""}${row.project ? projectPill(row.project) : ""}</div>
+    </div>
+    <span class="transaction-chevron">›</span>
+  </article>`;
+}
+
+function formatTransactionDate(value) {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value || "—";
+  return date.toLocaleDateString("ru-RU", { day: "2-digit", month: "short", year: "numeric" });
+}
+
 function renderTransactions() {
-  const rows = filteredRows().sort((a, b) => b.date.localeCompare(a.date));
-  byId("transactionRows").innerHTML = rows.slice(0, 500).map((row) => {
-    const cls = row.amount >= 0 ? "good" : "bad";
-    return `<tr class="clickable-row" data-row-id="${escapeHtml(row.id)}" tabindex="0"><td>${escapeHtml(row.date)}</td><td>${escapeHtml(row.description)}</td><td>${categoryPill(row.category)}</td><td>${accountPill(row.account)}</td><td>${escapeHtml(row.payee || "-")}</td><td>${projectPill(row.project || categoryMeta(categoryRoot(row)).project)}</td><td class="amount ${cls}">${money(row.amount)}</td></tr>`;
-  }).join("");
+  const rows = filteredRows().sort((a, b) => `${b.date} ${b.time || ""}`.localeCompare(`${a.date} ${a.time || ""}`));
+  const target = byId("transactionRows");
+  if (target) target.innerHTML = rows.length
+    ? rows.map(transactionCardTemplate).join("")
+    : `<div class="empty-state"><strong>Операции не найдены</strong><p>Сбросьте фильтры или измените запрос.</p></div>`;
+  if (byId("transactionsVisibleCount")) byId("transactionsVisibleCount").textContent = `${rows.length.toLocaleString("ru-RU")} операций`;
   if (document.querySelector("#transactions.view.active")) {
-    byId("pageSubtitle").textContent = `Найдено ${rows.length.toLocaleString("ru-RU")} операций. Нажмите на строку, чтобы открыть детали.`;
+    byId("pageSubtitle").textContent = `Показаны все ${rows.length.toLocaleString("ru-RU")} операций. Нажмите на карточку, чтобы открыть детали.`;
   }
 }
 
@@ -689,6 +715,74 @@ function buildExpenseHistogram(rows, range) {
   return values.map((item) => `<div class="histogram-bar" title="${escapeHtml(item.label)} • ${money(item.total)}"><i style="height:${Math.max(4, Math.round((item.total / max) * 100))}%"></i><span>${escapeHtml(item.label)}</span></div>`).join("");
 }
 
+function reportMonthlySeries(rows) {
+  const map = new Map();
+  rows.forEach((row) => {
+    const date = rowDate(row);
+    if (!date || typeOf(row) === "transfer") return;
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const item = map.get(key) || { key, income: 0, expense: 0 };
+    if (row.amount > 0) item.income += row.amount;
+    if (row.amount < 0) item.expense += Math.abs(row.amount);
+    map.set(key, item);
+  });
+  return [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function renderCategoryDonut(items, total) {
+  const donut = byId("reportCategoryDonut");
+  const legend = byId("reportCategoryLegend");
+  if (!donut || !legend) return;
+  const palette = ["#5f63f2", "#16a085", "#f59e0b", "#e85d75", "#3b82f6", "#8b5cf6", "#10b981", "#f97316"];
+  const top = items.slice(0, 7);
+  const used = top.reduce((sum, item) => sum + item.total, 0);
+  const data = [...top];
+  if (total > used) data.push({ name: "Прочее", total: total - used, count: 0 });
+  let cursor = 0;
+  const stops = data.map((item, index) => {
+    const start = cursor;
+    cursor += total ? (item.total / total) * 100 : 0;
+    return `${palette[index % palette.length]} ${start.toFixed(2)}% ${cursor.toFixed(2)}%`;
+  });
+  donut.style.background = total ? `conic-gradient(${stops.join(",")})` : "#eef2f7";
+  donut.innerHTML = `<div><strong>${money(total)}</strong><span>расходы</span></div>`;
+  legend.innerHTML = data.map((item, index) => `<button class="legend-row drill-card" data-drill-kind="category" data-drill-value="${escapeHtml(item.name)}"><i style="background:${palette[index % palette.length]}"></i><span>${escapeHtml(item.name)}</span><b>${total ? Math.round(item.total / total * 100) : 0}%</b></button>`).join("");
+}
+
+function renderIncomeExpenseChart(rows) {
+  const target = byId("reportIncomeExpense");
+  if (!target) return;
+  const income = rows.filter((row) => row.amount > 0 && typeOf(row) !== "transfer").reduce((sum, row) => sum + row.amount, 0);
+  const expense = rows.filter((row) => row.amount < 0 && typeOf(row) !== "transfer").reduce((sum, row) => sum + Math.abs(row.amount), 0);
+  const max = Math.max(income, expense, 1);
+  target.innerHTML = [
+    { label: "Доходы", value: income, cls: "income" },
+    { label: "Расходы", value: expense, cls: "expense" }
+  ].map((item) => `<div class="comparison-column"><div class="comparison-value">${money(item.value)}</div><div class="comparison-track"><i class="${item.cls}" style="height:${Math.max(4, Math.round(item.value / max * 100))}%"></i></div><span>${item.label}</span></div>`).join("");
+}
+
+function renderMonthlyLineChart(rows) {
+  const target = byId("reportMonthlyChart");
+  if (!target) return;
+  const data = reportMonthlySeries(rows);
+  if (!data.length) { target.innerHTML = `<div class="empty-state">Нет данных для графика</div>`; return; }
+  const width = 900, height = 280, padX = 48, padY = 28;
+  const max = Math.max(...data.flatMap((item) => [item.income, item.expense]), 1);
+  const x = (i) => padX + (data.length === 1 ? (width - padX * 2) / 2 : i * (width - padX * 2) / (data.length - 1));
+  const y = (v) => height - padY - (v / max) * (height - padY * 2);
+  const points = (key) => data.map((item, i) => `${x(i)},${y(item[key])}`).join(" ");
+  const labels = data.map((item, i) => `<text x="${x(i)}" y="${height - 7}" text-anchor="middle">${new Date(item.key + '-01T00:00:00').toLocaleDateString('ru-RU',{month:'short',year:'2-digit'})}</text>`).join("");
+  target.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Динамика доходов и расходов"><line x1="${padX}" y1="${height-padY}" x2="${width-padX}" y2="${height-padY}" class="chart-axis"/><polyline points="${points('expense')}" class="chart-line expense-line"/><polyline points="${points('income')}" class="chart-line income-line"/>${data.map((item,i)=>`<circle cx="${x(i)}" cy="${y(item.expense)}" r="5" class="expense-point"><title>Расходы ${item.key}: ${money(item.expense)}</title></circle><circle cx="${x(i)}" cy="${y(item.income)}" r="5" class="income-point"><title>Доходы ${item.key}: ${money(item.income)}</title></circle>`).join('')}<g class="chart-labels">${labels}</g></svg><div class="line-legend"><span><i class="income-dot"></i>Доходы</span><span><i class="expense-dot"></i>Расходы</span></div>`;
+}
+
+function renderAccountBars(rows) {
+  const target = byId("reportAccountBars");
+  if (!target) return;
+  const items = summarizeRows(rows, (row) => row.account || row.from || "Без счёта", (row) => row.amount < 0 && typeOf(row) !== "transfer").slice(0, 8);
+  const max = items[0]?.total || 1;
+  target.innerHTML = items.length ? items.map((item) => `<button class="account-bar drill-card" data-drill-kind="account" data-drill-value="${escapeHtml(item.name)}"><span>${accountPill(item.name)}</span><div><i style="width:${Math.max(3, Math.round(item.total/max*100))}%"></i></div><b>${money(item.total)}</b></button>`).join("") : `<div class="empty-state">Нет расходов по счетам</div>`;
+}
+
 function renderReports() {
   const range = rowsInReportPeriod();
   const expenses = range.rows.filter((row) => row.amount < 0);
@@ -703,7 +797,10 @@ function renderReports() {
   byId("reportProjectTotal").textContent = `${money(projectTotal)} из расходов`;
   byId("reportCategoryCount").textContent = categories.length.toLocaleString("ru-RU");
   byId("reportTrendTotal").textContent = money(totalExpense);
-  byId("reportHistogram").innerHTML = buildExpenseHistogram(range.rows, range) || `<div class="empty-state">Нет расходов за выбранный период</div>`;
+  renderCategoryDonut(categories, totalExpense);
+  renderIncomeExpenseChart(range.rows);
+  renderMonthlyLineChart(range.rows);
+  renderAccountBars(range.rows);
   byId("reportCategories").innerHTML = categories.length
     ? categories.map((item) => reportShareRow(item, totalExpense, "category")).join("")
     : `<article class="row"><div><strong>Нет расходов</strong><small>Выберите другой период или импортируйте операции.</small></div><b>-</b></article>`;
@@ -926,9 +1023,15 @@ function showOperationDetails(id) {
     ["Счет списания", row.from || "-"],
     ["Счет зачисления", row.to || "-"],
     ["Баланс после операции", money(row.balance)],
+    ["ФН", row.receipt?.fn || "-"],
+    ["ФД", row.receipt?.fd || "-"],
+    ["ФП", row.receipt?.fp || "-"],
     ["ID", row.id || "-"]
   ];
-  byId("operationDetails").innerHTML = detailRows.map(([label, value]) => `<div class="detail-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+  const receiptItemsHtml = Array.isArray(row.receipt?.items) && row.receipt.items.length
+    ? `<section class="receipt-fiscal-card"><h3>Позиции чека</h3>${row.receipt.items.map((item) => `<div class="detail-row"><span>${escapeHtml(item.name || "Товар")}</span><strong>${money(Number(item.price) || 0)}</strong></div>`).join("")}</section>`
+    : "";
+  byId("operationDetails").innerHTML = detailRows.map(([label, value]) => `<div class="detail-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("") + receiptItemsHtml;
   byId("detailDialog").showModal();
 }
 
@@ -938,6 +1041,7 @@ function setView(id) {
   byId("pageTitle").textContent = views[id]?.[0] || "ФинПорядок";
   byId("pageSubtitle").textContent = views[id]?.[1] || "";
   if (id === "transactions") renderTransactions();
+  if (id === "reports") renderReports();
 }
 
 function parseCsvText(text) {
@@ -1648,13 +1752,23 @@ async function extractQrTextFromPdfImages(file) {
   return texts.join("\n");
 }
 
+function resetTransactionFilters() {
+  if (byId("searchInput")) byId("searchInput").value = "";
+  if (byId("accountFilter")) byId("accountFilter").value = "all";
+  if (byId("categoryFilter")) byId("categoryFilter").value = "all";
+  if (byId("typeFilter")) byId("typeFilter").value = "all";
+}
+
 document.addEventListener("click", (event) => {
   const nav = event.target.closest("[data-view]");
   const jump = event.target.closest("[data-view-jump]");
   const row = event.target.closest("[data-row-id]");
   const drill = event.target.closest("[data-drill-kind]");
   if (nav) setView(nav.dataset.view);
-  if (jump) setView(jump.dataset.viewJump);
+  if (jump) {
+    if (jump.dataset.viewJump === "transactions") resetTransactionFilters();
+    setView(jump.dataset.viewJump);
+  }
   if (drill) openDrilldown(drill.dataset.drillKind, drill.dataset.drillValue);
   else if (row) showOperationDetails(row.dataset.rowId);
   if (event.target.closest("[data-close]")) event.target.closest("dialog")?.close();
@@ -1680,10 +1794,11 @@ byId("reportPeriod")?.addEventListener("change", renderReports);
 byId("drillPeriod")?.addEventListener("change", refreshDrilldown);
 byId("drillSort")?.addEventListener("change", refreshDrilldown);
 byId("clearFilters").addEventListener("click", () => {
-  byId("searchInput").value = "";
-  byId("accountFilter").value = "all";
-  byId("categoryFilter").value = "all";
-  byId("typeFilter").value = "all";
+  resetTransactionFilters();
+  renderTransactions();
+});
+byId("showAllTransactions")?.addEventListener("click", () => {
+  resetTransactionFilters();
   renderTransactions();
 });
 
@@ -1885,5 +2000,181 @@ byId("parsePasteBtn").addEventListener("click", () => {
   byId("importResult").textContent = `Загружено ${rows.length} операций из вставленного CSV.`;
   render();
 });
+
+
+// ---------------- Кассовые чеки по QR ----------------
+function parseFiscalReceiptQr(rawText) {
+  const raw = String(rawText || "").trim();
+  const params = new URLSearchParams(raw.includes("?") ? raw.split("?").pop() : raw.replace(/^qr:/i, ""));
+  const get = (...keys) => keys.map((key) => params.get(key)).find(Boolean) || "";
+  const amount = Number(String(get("s", "sum", "amount")).replace(",", "."));
+  const timestamp = get("t", "date");
+  let date = new Date().toISOString().slice(0, 10);
+  let time = new Date().toTimeString().slice(0, 5);
+  const match = timestamp.match(/^(\d{4})(\d{2})(\d{2})T?(\d{2})?(\d{2})?/);
+  if (match) {
+    date = `${match[1]}-${match[2]}-${match[3]}`;
+    if (match[4] && match[5]) time = `${match[4]}:${match[5]}`;
+  }
+  const fn = get("fn");
+  const fd = get("i", "fd");
+  const fp = get("fp", "fiscalSign");
+  const operationType = get("n", "type") || "1";
+  if (!Number.isFinite(amount) || amount <= 0 || !(fn || fd || fp)) {
+    throw new Error("Это не похоже на QR российского кассового чека: не найдены сумма или фискальные реквизиты.");
+  }
+  return { raw, amount, date, time, fn, fd, fp, operationType, fiscalKey: [fn, fd, fp].filter(Boolean).join("-") };
+}
+
+function receiptSelectOptions() {
+  const accounts = [...new Set([
+    ...state.rows.flatMap((row) => [row.account, row.from, row.to]),
+    ...state.accounts.map((account) => account.name)
+  ].filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru"));
+  const categories = [...new Set([
+    ...state.rows.map((row) => row.category),
+    ...state.categories.map((category) => category.name)
+  ].filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru"));
+  const projects = [...new Set(state.rows.map((row) => row.project).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru"));
+  byId("receiptAccount").innerHTML = accounts.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+  byId("receiptCategory").innerHTML = categories.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+  byId("receiptProject").innerHTML = `<option value="">Без проекта</option>${projects.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("")}`;
+  const preferredCategory = categories.find((name) => /продукт|еда|покупк/i.test(name)) || categories[0] || "Без категории";
+  if (preferredCategory) byId("receiptCategory").value = preferredCategory;
+}
+
+function addReceiptItemRow(name = "", price = "") {
+  const row = document.createElement("div");
+  row.className = "receipt-item";
+  row.innerHTML = `<input class="receipt-item-name" placeholder="Название товара" value="${escapeHtml(name)}"><input class="receipt-item-price" type="number" min="0" step="0.01" placeholder="Цена" value="${escapeHtml(price)}"><button type="button" aria-label="Удалить позицию">×</button>`;
+  row.querySelector("button").addEventListener("click", () => row.remove());
+  byId("receiptItems").append(row);
+}
+
+function updateReceiptPreview() {
+  byId("receiptAmountPreview").textContent = money(Number(byId("receiptAmount").value) || 0);
+  const date = byId("receiptDate").value || "—";
+  const time = byId("receiptTime").value || "";
+  byId("receiptDatePreview").textContent = `${date}${time ? `, ${time}` : ""}`;
+}
+
+function openReceiptEditor(receipt) {
+  receiptSelectOptions();
+  byId("receiptRawQr").value = receipt.raw;
+  byId("receiptFiscalKey").value = receipt.fiscalKey;
+  byId("receiptAmount").value = receipt.amount.toFixed(2);
+  byId("receiptDate").value = receipt.date;
+  byId("receiptTime").value = receipt.time;
+  byId("receiptFn").value = receipt.fn;
+  byId("receiptFd").value = receipt.fd;
+  byId("receiptFp").value = receipt.fp;
+  byId("receiptOperationType").value = receipt.operationType;
+  byId("receiptMerchant").value = "";
+  byId("receiptDescription").value = "Покупка по кассовому чеку";
+  byId("receiptItems").innerHTML = "";
+  addReceiptItemRow();
+  updateReceiptPreview();
+  byId("receiptStatus").textContent = "QR распознан. Укажите магазин и при необходимости позиции чека.";
+  byId("receiptDialog").showModal();
+}
+
+byId("pasteReceiptQrBtn")?.addEventListener("click", () => {
+  const raw = window.prompt("Вставьте строку из QR кассового чека. Обычно она начинается с t=...&s=...&fn=...");
+  if (!raw) return;
+  try {
+    const receipt = parseFiscalReceiptQr(raw);
+    const duplicate = state.rows.find((row) => row.receipt?.fiscalKey && row.receipt.fiscalKey === receipt.fiscalKey);
+    if (duplicate) throw new Error(`Этот чек уже добавлен: ${duplicate.date}, ${duplicate.description}, ${money(Math.abs(duplicate.amount))}.`);
+    openReceiptEditor(receipt);
+    byId("importResult").textContent = "Строка кассового QR распознана. Проверьте данные.";
+  } catch (error) {
+    byId("importResult").textContent = `Чек не добавлен: ${error.message || error}`;
+  }
+});
+
+byId("receiptQrInput")?.addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  byId("importResult").textContent = `Сканирую кассовый QR из ${file.name}...`;
+  try {
+    const raw = await parseQrFile(file);
+    if (!raw) throw new Error("QR-код не найден. Сфотографируйте чек крупнее, без бликов и строго сверху.");
+    const receipt = parseFiscalReceiptQr(raw.split(/\r?\n/).find((line) => /(?:^|[?&])(?:fn|s|t)=/i.test(line)) || raw);
+    const duplicate = state.rows.find((row) => row.receipt?.fiscalKey && row.receipt.fiscalKey === receipt.fiscalKey);
+    if (duplicate) throw new Error(`Этот чек уже добавлен: ${duplicate.date}, ${duplicate.description}, ${money(Math.abs(duplicate.amount))}.`);
+    openReceiptEditor(receipt);
+    byId("importResult").textContent = "Кассовый QR распознан. Проверьте данные в открывшейся форме.";
+  } catch (error) {
+    byId("importResult").textContent = `Чек не добавлен: ${error.message || error}`;
+  } finally {
+    event.target.value = "";
+  }
+});
+
+byId("addReceiptItem")?.addEventListener("click", () => addReceiptItemRow());
+byId("receiptAmount")?.addEventListener("input", updateReceiptPreview);
+byId("receiptDate")?.addEventListener("input", updateReceiptPreview);
+byId("receiptTime")?.addEventListener("input", updateReceiptPreview);
+byId("copyReceiptQr")?.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(byId("receiptRawQr").value);
+    byId("receiptStatus").textContent = "Строка QR скопирована.";
+  } catch {
+    byId("receiptStatus").textContent = "Не удалось скопировать QR автоматически.";
+  }
+});
+
+byId("receiptForm")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+  const fiscalKey = data.fiscalKey;
+  if (state.rows.some((row) => row.receipt?.fiscalKey === fiscalKey)) {
+    byId("receiptStatus").textContent = "Этот чек уже существует в приложении.";
+    return;
+  }
+  const items = [...byId("receiptItems").querySelectorAll(".receipt-item")]
+    .map((item) => ({ name: item.querySelector(".receipt-item-name").value.trim(), price: Number(item.querySelector(".receipt-item-price").value) || 0 }))
+    .filter((item) => item.name || item.price);
+  const amount = Math.abs(Number(data.amount) || 0);
+  if (!amount) return;
+  state.rows.push({
+    id: `receipt-${fiscalKey || Date.now()}`,
+    date: data.date,
+    time: data.time || "",
+    description: data.description || data.merchant || "Покупка по кассовому чеку",
+    amount: -amount,
+    balance: 0,
+    category: data.category || "Без категории",
+    account: data.account,
+    payee: data.merchant,
+    project: data.project || "",
+    from: data.account,
+    to: "",
+    importSource: "Кассовый QR",
+    receipt: {
+      fiscalKey,
+      fn: data.fn,
+      fd: data.fd,
+      fp: data.fp,
+      operationType: data.operationType,
+      rawQr: data.rawQr,
+      items
+    }
+  });
+  state.importArchive.unshift({
+    id: `receipt-import-${Date.now()}`,
+    archivedAt: new Date().toISOString(),
+    source: `Кассовый QR: ${data.merchant}`,
+    reason: "Чек добавлен как расход",
+    existingId: "",
+    row: { date: data.date, description: data.description, amount: -amount, account: data.account, category: data.category }
+  });
+  ensureRowIds();
+  saveState();
+  byId("receiptDialog").close();
+  byId("importResult").textContent = `Чек добавлен: ${data.merchant}, ${money(amount)}.`;
+  render();
+});
+
 
 render();
