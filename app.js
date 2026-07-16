@@ -623,7 +623,11 @@ function renderDashboard() {
   byId("metricNet").className = net >= 0 ? "good" : "bad";
   if (byId("metricIncomeShare")) byId("metricIncomeShare").textContent = rows.length ? `${rows.filter((row) => row.amount > 0 && typeOf(row) !== 'transfer').length} поступлений` : 'Нет поступлений';
   if (byId("metricExpenseShare")) byId("metricExpenseShare").textContent = rows.length ? `${rows.filter((row) => row.amount < 0 && typeOf(row) !== 'transfer').length} расходов` : 'Нет расходов';
-  if (byId("metricAverage")) byId("metricAverage").textContent = `${money(averageExpense(rows))} средний чек`;
+  if (byId("metricAverage")) byId("metricAverage").textContent = `${money(averageExpense(rows))} средний расход`;
+  const workRows = rows.filter((row) => row.workExpense && row.amount < 0 && typeOf(row) !== "transfer");
+  const workTotal = workRows.reduce((sum, row) => sum + Math.abs(Number(row.amount) || 0), 0);
+  if (byId("metricWorkExpense")) byId("metricWorkExpense").textContent = money(workTotal);
+  if (byId("metricWorkExpenseCount")) byId("metricWorkExpenseCount").textContent = `${workRows.length} покупок`;
 
   const latest = [...rows].sort((a, b) => `${b.date} ${b.time || ''}`.localeCompare(`${a.date} ${a.time || ''}`)).slice(0, 12);
   byId("latestRows").innerHTML = latest.length ? latest.map(rowTemplate).join("") : `<tr><td colspan="6">Нет операций за выбранный период</td></tr>`;
@@ -633,12 +637,20 @@ function renderDashboard() {
     ? accountTotals.slice(0, 6).map((item) => accountSummaryRow(item.name, `${item.count} операций`, money(item.total))).join("")
     : `<article class="empty-state"><strong>Нет счетов</strong><p>За выбранный период движения не найдены.</p></article>`;
 
-  const cats = topBy(rows, categoryRoot, (row) => row.amount < 0).slice(0, 6);
+  const cats = topBy(rows, categoryRoot, (row) => row.amount < 0).slice(0, 8);
   byId("categorySummary").innerHTML = cats.length
-    ? cats.map((item) => progressRow(item.name, item.count, item.total, cats[0]?.total || 1)).join("")
+    ? cats.map((item) => {
+        const iconId = detectCategoryIcon(item.name);
+        const icon = categoryIcons[iconId] || categoryIcons.default;
+        return `<button class="dashboard-category-tile drill-card" data-drill-kind="category" data-drill-value="${escapeHtml(item.name)}" type="button">
+          <span class="category-icon" style="--cat-bg:${icon.tone}" aria-hidden="true"><svg viewBox="0 0 24 24">${icon.svg}</svg></span>
+          <strong>${escapeHtml(item.name)}</strong>
+          <b>${money(item.total)}</b>
+          <small>${item.count} операций</small>
+        </button>`;
+      }).join("")
     : `<article class="empty-state"><strong>Нет категорий</strong><p>За выбранный период расходов пока нет.</p></article>`;
 
-  buildMiniTrend(rows, range);
   renderInsuranceAlerts();
 }
 

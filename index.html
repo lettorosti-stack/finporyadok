@@ -53,21 +53,19 @@
 </div>
 <div class="top-actions">
 <input id="searchInput" placeholder="Найти операцию, магазин, проект или счёт" type="search"/>
-<button class="notification-button" id="notificationCenterBtn" type="button" aria-label="Уведомления">
-<span aria-hidden="true">🔔</span><b id="notificationBadge">0</b>
-</button>
 <button class="ghost" id="exportBtn">Экспорт</button>
 <button class="primary" id="addTxBtn">+ Операция</button>
 </div>
 </header>
 <section class="view active" id="dashboard">
-<div class="hero-card">
-<div class="hero-topbar">
-<div class="hero-main">
-<span>Финансовая картина</span>
-<h2 id="metricNet">0 ₽</h2>
-<small id="metricPeriod">—</small>
+<div class="hero-card finance-picture-card">
+<div class="finance-picture-head">
+<div>
+<span class="finance-picture-eyebrow">Финансовая картина</span>
+<h2>Деньги семьи</h2>
+<p id="metricPeriod">—</p>
 </div>
+<div class="finance-picture-actions">
 <label class="hero-period-select">Период
 <select id="dashboardPeriod">
 <option value="week">Неделя</option>
@@ -78,25 +76,37 @@
 <option value="all">Всё время</option>
 </select>
 </label>
+<button class="dashboard-notification-button" id="notificationCenterBtn" type="button" aria-label="Уведомления">
+<span aria-hidden="true">🔔</span><b id="notificationBadge" hidden>0</b>
+</button>
 </div>
-<div class="hero-stats">
-<div>
+</div>
+<div class="finance-picture-grid">
+<article class="finance-picture-tile finance-picture-tile--balance">
+<span>Разница</span>
+<strong id="metricNet">0 ₽</strong>
+<small>доходы минус расходы</small>
+</article>
+<article class="finance-picture-tile finance-picture-tile--income">
 <span>Доходы</span>
-<strong class="good" id="metricIncome">0 ₽</strong>
-<small id="metricIncomeShare">0 ₽</small>
-</div>
-<div>
+<strong id="metricIncome">0 ₽</strong>
+<small id="metricIncomeShare">0 поступлений</small>
+</article>
+<article class="finance-picture-tile finance-picture-tile--expense">
 <span>Расходы</span>
-<strong class="bad" id="metricExpense">0 ₽</strong>
-<small id="metricExpenseShare">0 ₽</small>
+<strong id="metricExpense">0 ₽</strong>
+<small id="metricExpenseShare">0 расходов</small>
+</article>
+<article class="finance-picture-tile finance-picture-tile--work">
+<span>К возмещению с работы</span>
+<strong id="metricWorkExpense">0 ₽</strong>
+<small id="metricWorkExpenseCount">0 покупок</small>
+</article>
 </div>
-<div>
-<span>Операции</span>
-<strong id="metricCount">0</strong>
-<small id="metricAverage">0 ₽ средний чек</small>
+<div class="finance-picture-footer">
+<span><b id="metricCount">0</b> операций</span>
+<span id="metricAverage">0 ₽ средний расход</span>
 </div>
-</div>
-<div class="hero-mini-chart" id="dashboardTrend"></div>
 </div>
 <div class="dashboard-grid">
 <section class="panel">
@@ -117,7 +127,7 @@
 </div>
 <button data-view-jump="budgets">Все</button>
 </div>
-<div class="stack" id="categorySummary"></div>
+<div class="dashboard-category-grid" id="categorySummary"></div>
 </section>
 <section class="panel wide">
 <div class="panel-head">
