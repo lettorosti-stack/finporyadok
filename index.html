@@ -305,11 +305,15 @@
 <span>Выгрузка из финансового приложения</span>
 <input accept=".csv,text/csv" id="fileInput" type="file"/>
 </label>
-<label class="upload-card receipt-upload-card">
+<div class="upload-card receipt-upload-card">
 <strong>Кассовый чек по QR</strong>
 <span>Сканировать камерой или выбрать фото чека</span>
+<button class="primary receipt-native-scan" id="nativeReceiptScanBtn" type="button">📷 Сканировать QR камерой</button>
+<label class="receipt-photo-fallback">
+<span>Выбрать готовое фото чека</span>
 <input accept="image/*" capture="environment" id="receiptQrInput" type="file"/>
 </label>
+</div>
 <label class="upload-card">
 <strong>QR банковской выписки</strong>
 <span>Проверка QR подлинности документа</span>

@@ -2102,6 +2102,34 @@ function processReceiptQrText(raw) {
   byId("importResult").textContent = "Кассовый QR распознан. Проверьте данные и сохраните расход.";
 }
 
+
+// Native Android QR scanner bridge.
+// The APK exposes window.AndroidQrScanner through MainActivity.
+window.onNativeQrScanned = function(rawValue) {
+  try {
+    processReceiptQrText(String(rawValue || ""));
+  } catch (error) {
+    const message = `Чек не распознан: ${error.message || error}`;
+    if (byId("qrPasteStatus")) byId("qrPasteStatus").textContent = message;
+    if (byId("importResult")) byId("importResult").textContent = message;
+  }
+};
+
+window.onNativeQrScanError = function(message) {
+  const text = message || "Не удалось запустить сканер QR.";
+  if (byId("qrPasteStatus")) byId("qrPasteStatus").textContent = text;
+  if (byId("importResult")) byId("importResult").textContent = text;
+};
+
+function startNativeReceiptScanner() {
+  if (window.AndroidQrScanner && typeof window.AndroidQrScanner.scanQr === "function") {
+    if (byId("importResult")) byId("importResult").textContent = "Открываю камеру для сканирования QR...";
+    window.AndroidQrScanner.scanQr();
+    return true;
+  }
+  return false;
+}
+
 byId("pasteReceiptQrBtn")?.addEventListener("click", () => openQrPasteDialog());
 byId("txPasteReceiptBtn")?.addEventListener("click", () => openQrPasteDialog());
 
@@ -2143,7 +2171,11 @@ byId("receiptQrInput")?.addEventListener("change", async (event) => {
   event.target.value = "";
 });
 
-byId("txScanReceiptBtn")?.addEventListener("click", () => byId("txReceiptQrInput")?.click());
+byId("txScanReceiptBtn")?.addEventListener("click", () => {
+  if (!startNativeReceiptScanner()) {
+    byId("txReceiptQrInput")?.click();
+  }
+});
 byId("txReceiptQrInput")?.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
   byId("txDialog")?.close();
@@ -2218,3 +2250,9 @@ byId("receiptForm")?.addEventListener("submit", (event) => {
 
 
 render();
+
+byId("nativeReceiptScanBtn")?.addEventListener("click", () => {
+  if (!startNativeReceiptScanner()) {
+    byId("receiptQrInput")?.click();
+  }
+});

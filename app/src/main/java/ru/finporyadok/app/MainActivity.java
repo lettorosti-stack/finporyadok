@@ -5,20 +5,30 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
-import android.view.ViewGroup;
+import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.view.ViewGroup;
+
+import com.google.android.gms.tasks.Task;
+import com.google.mlkit.vision.barcode.common.Barcode;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanner;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning;
+
+import org.json.JSONObject;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 1001;
     private WebView webView;
     private ValueCallback<Uri[]> filePathCallback;
+    private GmsBarcodeScanner barcodeScanner;
 
     @Override
-    @SuppressLint("SetJavaScriptEnabled")
+    @SuppressLint({"SetJavaScriptEnabled", "JavascriptInterface"})
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
@@ -35,31 +45,71 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(true);
         settings.setDatabaseEnabled(true);
 
+        GmsBarcodeScannerOptions options = new GmsBarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                .enableAutoZoom()
+                .build();
+        barcodeScanner = GmsBarcodeScanning.getClient(this, options);
+
+        webView.addJavascriptInterface(new AndroidQrBridge(), "AndroidQrScanner");
         webView.setWebViewClient(new WebViewClient());
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onShowFileChooser(
                     WebView webView,
-                    ValueCallback<Uri[]> filePathCallback,
-                    FileChooserParams fileChooserParams
+                    ValueCallback<Uri[]> callback,
+                    FileChooserParams params
             ) {
-                if (MainActivity.this.filePathCallback != null) {
-                    MainActivity.this.filePathCallback.onReceiveValue(null);
+                if (filePathCallback != null) {
+                    filePathCallback.onReceiveValue(null);
                 }
-
-                MainActivity.this.filePathCallback = filePathCallback;
-                Intent intent = fileChooserParams.createIntent();
+                filePathCallback = callback;
+                Intent intent = params.createIntent();
                 try {
                     startActivityForResult(intent, FILE_CHOOSER_REQUEST);
                 } catch (Exception exception) {
-                    MainActivity.this.filePathCallback = null;
+                    filePathCallback = null;
                     return false;
                 }
                 return true;
             }
         });
+
         setContentView(webView);
         webView.loadUrl("file:///android_asset/www/index.html");
+    }
+
+    public final class AndroidQrBridge {
+        @JavascriptInterface
+        public void scanQr() {
+            runOnUiThread(() -> {
+                if (barcodeScanner == null) {
+                    sendQrError("Сканер QR недоступен.");
+                    return;
+                }
+                Task<Barcode> task = barcodeScanner.startScan();
+                task.addOnSuccessListener(barcode -> {
+                    String value = barcode.getRawValue();
+                    if (value == null || value.trim().isEmpty()) {
+                        sendQrError("QR-код не содержит данных.");
+                        return;
+                    }
+                    String js = "window.onNativeQrScanned(" + JSONObject.quote(value) + ");";
+                    webView.post(() -> webView.evaluateJavascript(js, null));
+                });
+                task.addOnCanceledListener(() -> sendQrError("Сканирование отменено."));
+                task.addOnFailureListener(error ->
+                        sendQrError(error.getMessage() == null
+                                ? "Не удалось запустить сканер QR."
+                                : error.getMessage())
+                );
+            });
+        }
+    }
+
+    private void sendQrError(String message) {
+        String js = "window.onNativeQrScanError(" + JSONObject.quote(message) + ");";
+        webView.post(() -> webView.evaluateJavascript(js, null));
     }
 
     @Override
@@ -68,7 +118,6 @@ public class MainActivity extends Activity {
         if (requestCode != FILE_CHOOSER_REQUEST || filePathCallback == null) {
             return;
         }
-
         Uri[] results = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
         filePathCallback.onReceiveValue(results);
         filePathCallback = null;
