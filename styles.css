@@ -1323,3 +1323,5 @@ dialog menu {
 @media(max-width:600px){.alimony-rule-preview{grid-template-columns:1fr}}
 
 .official-value-field{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}.official-refresh-btn{min-height:44px;white-space:nowrap}.official-data-status{display:block;margin-top:6px;color:#64748b;line-height:1.35}.official-data-status[data-tone="success"]{color:#166534}.official-data-status[data-tone="warning"]{color:#9a3412}.official-data-status[data-tone="error"]{color:#b91c1c}.official-source-link{display:inline-flex;margin-top:7px;font-size:12px;font-weight:700;color:#0f766e}@media(max-width:520px){.official-value-field{grid-template-columns:1fr}.official-refresh-btn{width:100%}}
+
+.alimony-rule-card[data-alimony-rule-id]{cursor:pointer;transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease}.alimony-rule-card[data-alimony-rule-id]:hover,.alimony-rule-card[data-alimony-rule-id]:focus-visible{transform:translateY(-1px);box-shadow:0 10px 24px rgba(20,47,62,.10);border-color:rgba(15,118,110,.42);outline:none}.alimony-edit-hint{font-size:12px;color:#0f766e!important;margin-top:8px!important}

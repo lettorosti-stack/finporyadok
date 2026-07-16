@@ -701,7 +701,7 @@
 
 <dialog class="alimony-dialog" id="alimonyRuleDialog">
 <form id="alimonyRuleForm">
-<header><div><h2>Правило начисления алиментов</h2><p>Можно добавлять новые правила с даты изменения размера</p></div><button data-close="" type="button">×</button></header>
+<header><div><h2 id="alimonyRuleDialogTitle">Правило начисления алиментов</h2><p id="alimonyRuleDialogSubtitle">Можно добавлять новые правила с даты изменения размера</p></div><button data-close="" type="button">×</button></header>
 <div class="alimony-form-grid">
 <label>Действует с<input name="effectiveFrom" required="" type="month"/></label>
 <label>Количество детей<input min="1" name="childrenCount" required="" type="number" value="2"/></label>
@@ -726,7 +726,7 @@
 <label class="alimony-basis-field">Основание<textarea name="basis" rows="3" placeholder="Решение суда, дата вступления в силу"></textarea></label>
 </div>
 <div class="alimony-rule-preview" id="alimonyRulePreview"></div>
-<menu><button data-close="" type="button">Отмена</button><button class="primary" type="submit">Сохранить правило</button></menu>
+<menu><button data-close="" type="button">Отмена</button><button class="primary" id="alimonyRuleSubmitBtn" type="submit">Сохранить правило</button></menu>
 </form>
 </dialog>
 
