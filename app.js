@@ -82,6 +82,58 @@ function categoryRoot(row) {
   return String(row.category || "Без категории").split(":")[0];
 }
 
+
+const categoryAssetRules = [
+  ["groceries.png", ["продукт", "еда", "супермаркет", "пятероч", "магнит", "перекрест", "лента", "вкусвилл"]],
+  ["home.png", ["дом", "жилье", "квартира", "ипотека", "аренда"]],
+  ["car.png", ["автомобиль", "авто", "машина", "бензин", "топливо", "азс", "мойка", "парковка", "запчаст"]],
+  ["health.png", ["здоров", "медицин", "аптек", "врач", "клиник", "лекар"]],
+  ["children.png", ["дети", "детск", "ребен", "ребён", "семья", "алим"]],
+  ["education.png", ["образован", "обучен", "школ", "курс", "репетитор"]],
+  ["cafe-restaurants.png", ["кафе", "ресторан", "кофе", "доставка еды", "фастфуд"]],
+  ["clothing-shoes.png", ["одежд", "обув", "гардероб"]],
+  ["beauty.png", ["красот", "космет", "салон", "маникюр", "парикмах"]],
+  ["travel.png", ["путешеств", "туризм", "отель", "авиа", "самолет", "самолёт", "поездка"]],
+  ["entertainment.png", ["развлеч", "кино", "театр", "концерт", "игры"]],
+  ["sport.png", ["спорт", "фитнес", "трениров", "гимнаст"]],
+  ["gifts.png", ["подар"]],
+  ["pets.png", ["животн", "питом", "ветерин", "корм"]],
+  ["phone-internet.png", ["связь", "интернет", "телефон", "мобильн", "wi-fi", "wifi"]],
+  ["utilities.png", ["коммун", "жкх", "электр", "вода", "газ", "отоплен"]],
+  ["transport.png", ["транспорт", "автобус", "метро", "такси", "проезд"]],
+  ["insurance.png", ["страхован", "страховка"]],
+  ["finance.png", ["финанс", "накоплен", "инвест", "кредит", "долг", "кошелек", "кошелёк"]],
+  ["books.png", ["книг", "литератур"]],
+  ["taxes-fees.png", ["налог", "сбор", "пошлин"]],
+  ["repair.png", ["ремонт", "строит", "материал", "инструмент"]],
+  ["garden.png", ["дача", "сад", "огород", "растен"]],
+  ["subscriptions.png", ["подписк", "сервис"]],
+  ["electronics.png", ["техника", "электроник", "гаджет", "компьютер", "ноутбук"]],
+  ["bank-fees.png", ["банк", "комисси", "процент", "обслуживание карты"]],
+  ["leisure.png", ["отдых", "досуг"]],
+  ["charity.png", ["благотвор", "пожертвован"]],
+  ["work.png", ["работа", "бизнес", "офис"]],
+  ["other.png", ["другое", "прочее", "без категории"]]
+];
+
+const categoryAssetByIconId = {
+  groceries: "groceries.png", food: "groceries.png", home: "home.png", rent: "home.png",
+  car: "car.png", fuel: "car.png", service: "repair.png", health: "health.png", pharmacy: "health.png",
+  children: "children.png", family: "children.png", education: "education.png", cafe: "cafe-restaurants.png",
+  clothes: "clothing-shoes.png", beauty: "beauty.png", travel: "travel.png", entertainment: "entertainment.png",
+  sport: "sport.png", gift: "gifts.png", pets: "pets.png", internet: "phone-internet.png", phone: "phone-internet.png",
+  utilities: "utilities.png", utility: "utilities.png", transport: "transport.png", taxi: "transport.png",
+  insurance: "insurance.png", savings: "finance.png", investment: "finance.png", debt: "finance.png",
+  wallet: "finance.png", cash: "finance.png", card: "finance.png", taxes: "taxes-fees.png", subscriptions: "subscriptions.png",
+  custom: "other.png", default: "other.png"
+};
+
+function categoryAssetFile(categoryName, iconId = "") {
+  const normalized = normalizeBrandText(categoryName);
+  const rule = categoryAssetRules.find(([, aliases]) => aliases.some((alias) => normalized.includes(normalizeBrandText(alias))));
+  return rule?.[0] || categoryAssetByIconId[iconId] || "other.png";
+}
+
 const categoryIcons = {
   home: { label: "Дом", tone: "#0f766e", svg: '<path d="M4 11.5 12 5l8 6.5"/><path d="M6.5 10.5V20h11v-9.5"/><path d="M10 20v-6h4v6"/>' },
   build: { label: "Материалы", tone: "#b45309", svg: '<path d="M5 19 19 5"/><path d="m14 5 5 5"/><path d="M4 20h7"/><path d="M7 17l-2-2"/>' },
@@ -263,13 +315,12 @@ function defaultProjectForCategory(categoryName) {
 }
 
 function categoryIcon(categoryName) {
-  const meta = categoryMeta(categoryRoot({ category: categoryName }));
+  const root = categoryRoot({ category: categoryName });
+  const meta = categoryMeta(root);
   const catalog = financeIconCatalog[meta.icon];
-  if (catalog) {
-    return `<span class="category-icon" style="--cat-bg:${catalog[1]}" title="${escapeHtml(catalog[0])}" aria-label="${escapeHtml(catalog[0])}"><svg viewBox="0 0 24 24" aria-hidden="true">${financeIconSymbols[meta.icon] || ""}</svg></span>`;
-  }
-  const icon = categoryIcons[meta.icon] || categoryIcons.default;
-  return `<span class="category-icon" style="--cat-bg:${icon.tone}" title="${escapeHtml(icon.label)}" aria-label="${escapeHtml(icon.label)}"><svg viewBox="0 0 24 24" aria-hidden="true">${icon.svg}</svg></span>`;
+  const fallbackLabel = catalog?.[0] || categoryIcons[meta.icon]?.label || root || "Категория";
+  const assetFile = categoryAssetFile(root, meta.icon);
+  return `<span class="category-icon category-icon--asset" title="${escapeHtml(fallbackLabel)}" aria-label="${escapeHtml(fallbackLabel)}"><img src="./assets/category-icons/${escapeHtml(assetFile)}" alt="" loading="lazy" decoding="async" onerror="this.closest('.category-icon').classList.add('category-icon--missing');this.remove()"></span>`;
 }
 
 function categoryPill(categoryName) {
