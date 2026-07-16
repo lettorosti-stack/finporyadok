@@ -647,8 +647,49 @@ function renderWorkExpenseCenter() {
   if(byId("workExpenseList")) byId("workExpenseList").innerHTML=filtered.length?filtered.map(workExpenseCard).join(""):`<article class="empty-state"><strong>Ничего не найдено</strong><p>Измените фильтры.</p></article>`;
 }
 
+function loanPaymentReminders() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  return regularOccurrences().filter((item) => item.paymentType === "loan" && occurrenceStatus(item) !== "paid").map((item) => {
+    const due = new Date(`${item.dueDate}T00:00:00`);
+    const daysLeft = Math.round((due - today) / 86400000);
+    return {...item, daysLeft};
+  }).filter((item) => item.daysLeft <= 3).sort((a,b) => a.dueDate.localeCompare(b.dueDate));
+}
+
+function renderLoanAlerts() {
+  const target = byId("loanAlerts"), countNode = byId("loanAlertCount");
+  if (!target || !countNode) return;
+  const items = loanPaymentReminders(); countNode.textContent = items.length;
+  target.innerHTML = items.length ? items.map((item) => {
+    const status = item.daysLeft < 0 ? `Просрочен на ${Math.abs(item.daysLeft)} дн.` : item.daysLeft === 0 ? "Платёж сегодня" : `До платежа ${item.daysLeft} дн.`;
+    return `<article class="alert-card ${item.daysLeft < 0 ? "alert-card--danger" : "alert-card--warning"}"><div class="alert-card-copy"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.bank || item.payee || "Кредит")}</small><p>${escapeHtml(status)}. Напоминание останется до отметки об оплате или связи с банковской операцией.</p></div><div class="alert-card-side"><span>${money(item.amount)}</span><button class="ghost open-planned-payment" data-occurrence-id="${escapeHtml(item.occurrenceId)}" type="button">Оплатить</button></div></article>`;
+  }).join("") : `<article class="empty-state"><strong>Платежи под контролем</strong><p>На ближайшие 3 дня неоплаченных платежей по кредитам нет.</p></article>`;
+}
+
+
+function utilityEventReminders() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  return regularOccurrences().filter((item) => item.paymentType === 'utilities' && occurrenceStatus(item) !== 'paid').map((item) => {
+    const due = new Date(`${item.dueDate}T00:00:00`);
+    const daysLeft = Math.round((due - today) / 86400000);
+    return { ...item, daysLeft };
+  }).filter((item) => item.daysLeft === 3 || item.daysLeft === 0 || item.daysLeft < 0).sort((a,b) => a.dueDate.localeCompare(b.dueDate));
+}
+
+function renderUtilityAlerts() {
+  const target = byId('utilityAlerts'), countNode = byId('utilityAlertCount');
+  if (!target || !countNode) return;
+  const items = utilityEventReminders(); countNode.textContent = items.length;
+  target.innerHTML = items.length ? items.map((item) => {
+    const isMeter = item.eventKind === 'meter-reading';
+    const action = isMeter ? 'Передать показания' : 'Внести платёж';
+    const status = item.daysLeft < 0 ? `Срок пропущен на ${Math.abs(item.daysLeft)} дн.` : item.daysLeft === 0 ? `${action} сегодня` : `${action} через 3 дня`;
+    return `<article class="alert-card ${item.daysLeft < 0 ? 'alert-card--danger' : 'alert-card--warning'}"><div class="alert-card-copy"><strong>${escapeHtml(item.name)}</strong><small>${isMeter ? 'Передача показаний' : 'Оплата ЖКХ'} • ${escapeHtml(item.payee || item.project || 'Коммунальные услуги')}</small><p>${escapeHtml(status)}. Уведомление показывается за 3 дня и в день события${item.daysLeft < 0 ? ', а затем остаётся до отметки выполнения' : ''}.</p></div><div class="alert-card-side"><span>${formatTransactionDate(item.dueDate)}</span><button class="ghost open-planned-payment" data-occurrence-id="${escapeHtml(item.occurrenceId)}" type="button">${isMeter ? 'Отметить' : 'Оплатить'}</button></div></article>`;
+  }).join('') : `<article class="empty-state"><strong>ЖКХ под контролем</strong><p>Сегодня и через 3 дня нет событий по оплате или передаче показаний.</p></article>`;
+}
+
 function appNotificationCount() {
-  return insuranceReminderPolicies().length + workExpenseRows(false).length;
+  return insuranceReminderPolicies().length + loanPaymentReminders().length + utilityEventReminders().length + workExpenseRows(false).length;
 }
 
 function renderNotificationCenterBadge() {
@@ -669,6 +710,8 @@ function render() {
   renderRegularMoney();
   renderInsurance();
   renderInsuranceAlerts();
+  renderLoanAlerts();
+  renderUtilityAlerts();
   renderWorkReimbursement();
   renderNotificationCenterBadge();
   renderAlimony();
@@ -677,11 +720,58 @@ function render() {
   renderImportArchive();
 }
 
+
+function reviewItems() {
+  const items = [];
+  const seenDuplicate = new Set();
+  const groups = new Map();
+  state.rows.forEach((row) => {
+    const key = `${row.date || ''}|${Math.round((Number(row.amount) || 0) * 100)}|${normalizeBrandText(row.description || row.payee || '')}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+    const reasons = [];
+    if (!row.category || row.category === 'Без категории') reasons.push('не указана категория');
+    if (!row.account) reasons.push('не указан счёт');
+    if (!row.description && !row.payee) reasons.push('нет описания или получателя');
+    if (reasons.length) items.push({ kind: 'operation', id: row.id, title: row.description || row.payee || 'Операция без названия', subtitle: `${formatTransactionDate(row.date)} • ${money(row.amount)}`, reason: reasons.join(', ') });
+  });
+  groups.forEach((rows) => {
+    if (rows.length < 2) return;
+    rows.forEach((row) => {
+      if (seenDuplicate.has(row.id)) return;
+      seenDuplicate.add(row.id);
+      items.push({ kind: 'operation', id: row.id, title: row.description || row.payee || 'Возможный дубликат', subtitle: `${formatTransactionDate(row.date)} • ${money(row.amount)}`, reason: `возможный дубликат: найдено ${rows.length} операций с одинаковой датой, суммой и описанием` });
+    });
+  });
+  state.insurancePolicies.forEach((policy) => {
+    if (!policy.pdfStored) items.push({ kind: 'insurance', id: policy.id, title: policy.name || 'Страховой полис', subtitle: policy.subjectName || 'Объект не указан', reason: 'к полису не приложен PDF-документ' });
+  });
+  regularOccurrences().forEach((occurrence) => {
+    const saved = state.plannedPaymentStates[occurrence.occurrenceId] || {};
+    if (saved.paidAmount && Math.abs(Number(saved.paidAmount) - Number(occurrence.amount || 0)) > 1) {
+      items.push({ kind: 'planned', id: occurrence.occurrenceId, title: occurrence.name, subtitle: `${formatTransactionDate(occurrence.dueDate)} • план ${money(occurrence.amount)} / факт ${money(saved.paidAmount)}`, reason: 'фактическая сумма отличается от плановой' });
+    }
+    if (saved.transactionId && !state.rows.some((row) => row.id === saved.transactionId)) {
+      items.push({ kind: 'planned', id: occurrence.occurrenceId, title: occurrence.name, subtitle: formatTransactionDate(occurrence.dueDate), reason: 'связанная банковская операция не найдена' });
+    }
+  });
+  return items.slice(0, 250);
+}
+
+function renderReviewCenter() {
+  const items = reviewItems();
+  const count = byId('reviewCount');
+  if (count) count.textContent = items.length;
+  const target = byId('reviewCenterList');
+  if (!target) return;
+  target.innerHTML = items.length ? items.map((item) => `<article class="review-item"><div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.subtitle || '')}</small><p class="review-reason">Причина: ${escapeHtml(item.reason)}</p></div><div class="review-item-actions"><button class="ghost open-review-item" data-review-kind="${escapeHtml(item.kind)}" data-review-id="${escapeHtml(item.id)}" type="button">Открыть</button></div></article>`).join('') : `<article class="empty-state"><strong>Проверка не требуется</strong><p>Спорных документов и операций сейчас нет.</p></article>`;
+}
+
 function renderMeta() {
   const s = summary();
   byId("sourceName").textContent = window.ANDROMONEY_DATA?.source || "Локальные данные";
   byId("sourceMeta").textContent = `${s.rows.length} операций, ${s.minDate} - ${s.maxDate}`;
-  byId("reviewCount").textContent = Math.max(0, Math.round(s.rows.length * 0.04));
+  renderReviewCenter();
 }
 
 function renderDashboard() {
@@ -1081,7 +1171,7 @@ function plannedLoanPaymentsList(monthLimit = 12) {
               Math.max(0, Number(product.principal) - Number(product.principal) / months * (index - 1)) * ratePerMonth(product),
               0
             )
-          : calc.monthlyPayment;
+          : (Number(product.monthlyPaymentOverride) || calc.monthlyPayment);
         result.push({
           id: `${product.id}-payment-${index}`,
           productId: product.id,
@@ -1141,7 +1231,7 @@ function renderFinanceProducts() {
     : `<article class="empty-state"><strong>План пуст</strong><p>После добавления кредита здесь появятся будущие ежемесячные платежи.</p></article>`;
 
   const loanPrincipal = loans.reduce((sum, item) => sum + Number(item.principal || 0), 0);
-  const monthly = loans.reduce((sum, item) => sum + calculateLoan(item).monthlyPayment, 0);
+  const monthly = loans.reduce((sum, item) => sum + (Number(item.monthlyPaymentOverride) || calculateLoan(item).monthlyPayment), 0);
   const depositPrincipal = deposits.reduce((sum, item) => sum + Number(item.principal || 0), 0);
   const maturity = deposits.reduce((sum, item) => sum + calculateDeposit(item).maturity, 0);
   const nextMonthTotal = plan.filter((item) => {
@@ -1168,6 +1258,8 @@ function toggleFinanceProductFields() {
   const type = byId("financeProductType").value;
   document.querySelectorAll(".loan-only").forEach((item) => item.hidden = type !== "loan");
   document.querySelectorAll(".deposit-only").forEach((item) => item.hidden = type !== "deposit");
+  document.querySelectorAll(".loan-sum-label").forEach((item) => item.hidden = type !== "loan");
+  document.querySelectorAll(".deposit-sum-label").forEach((item) => item.hidden = type !== "deposit");
   updateFinanceCalculationPreview();
 }
 
@@ -1178,6 +1270,9 @@ function currentFinanceFormProduct() {
     name: data.name || "Предварительный расчёт",
     bank: data.bank || "",
     principal: Number(data.principal) || 0,
+    downPayment: Number(data.downPayment) || 0,
+    openingBalance: Number(data.openingBalance) || Number(data.principal) || 0,
+    monthlyPaymentOverride: Number(data.monthlyPaymentOverride) || 0,
     rate: Number(data.rate) || 0,
     rateMode: data.rateMode || "annual",
     termMonths: Number(data.termMonths) || 1,
@@ -1196,7 +1291,9 @@ function updateFinanceCalculationPreview() {
   const product = currentFinanceFormProduct();
   if (product.type === "loan") {
     const calc = calculateLoan(product);
-    target.innerHTML = `<div><span>Ежемесячный платёж</span><strong>${money(calc.monthlyPayment)}</strong></div>
+    const effectivePayment = Number(product.monthlyPaymentOverride) || calc.monthlyPayment;
+    target.innerHTML = `<div><span>Расчётный платёж</span><strong>${money(calc.monthlyPayment)}</strong></div>
+      <div><span>Платёж в плане</span><strong>${money(effectivePayment)}</strong></div>
       ${calc.lastPayment ? `<div><span>Последний платёж</span><strong>${money(calc.lastPayment)}</strong></div>` : ""}
       <div><span>Всего выплат</span><strong>${money(calc.total)}</strong></div>
       <div><span>Переплата</span><strong>${money(calc.interest)}</strong></div>`;
@@ -2866,7 +2963,9 @@ byId("openWorkExpensesBtn")?.addEventListener("click", () => {
 byId("notificationCenterBtn")?.addEventListener("click", () => {
   setView("dashboard");
   const insuranceAlerts = insuranceReminderPolicies();
-  const target = insuranceAlerts.length ? byId("insuranceAlertsPanel") : byId("workReimbursementPanel");
+  const loanAlerts = loanPaymentReminders();
+  const utilityAlerts = utilityEventReminders();
+  const target = insuranceAlerts.length ? byId("insuranceAlertsPanel") : loanAlerts.length ? byId("loanAlertsPanel") : utilityAlerts.length ? byId("utilityAlertsPanel") : byId("workReimbursementPanel");
   target?.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 
@@ -3421,14 +3520,38 @@ document.addEventListener("keydown",event=>{
   }
 });
 
-byId("addFinanceProductBtn")?.addEventListener("click", () => {
+let editingFinanceProductId = null;
+
+function openFinanceProductDialog(product = null) {
   populateFinanceCategorySelects();
-  byId("financeProductForm").reset();
-  byId("financeProductForm").elements.startDate.value = new Date().toISOString().slice(0, 10);
-  byId("financeProductForm").elements.termMonths.value = 12;
-  byId("financeProductForm").elements.paymentDay.value = 10;
+  const form = byId("financeProductForm");
+  form.reset();
+  editingFinanceProductId = product?.id || null;
+  form.elements.productId.value = product?.id || "";
+  form.elements.startDate.value = product?.startDate || new Date().toISOString().slice(0, 10);
+  form.elements.termMonths.value = product?.termMonths || 12;
+  form.elements.paymentDay.value = product?.paymentDay || 10;
+  if (product) {
+    Object.entries(product).forEach(([key, value]) => {
+      if (form.elements[key] && !["openingBalance", "monthlyPaymentOverride"].includes(key)) form.elements[key].value = value ?? "";
+    });
+    if (product.type === "loan") {
+      form.elements.openingBalance.value = loanRemaining(product);
+      form.elements.monthlyPaymentOverride.value = Number(product.monthlyPaymentOverride) || calculateLoan(product).monthlyPayment;
+    }
+  } else {
+    form.elements.productType.value = "loan";
+    form.elements.downPayment.value = 0;
+    form.elements.openingBalance.value = "";
+    form.elements.monthlyPaymentOverride.value = "";
+  }
+  form.elements.monthlyPaymentOverride.dataset.manual = product?.monthlyPaymentOverride ? "true" : "false";
   toggleFinanceProductFields();
   byId("financeProductDialog").showModal();
+}
+
+byId("addFinanceProductBtn")?.addEventListener("click", () => {
+  openFinanceProductDialog();
 });
 
 byId("financeProductType")?.addEventListener("change", toggleFinanceProductFields);
@@ -3438,8 +3561,17 @@ byId("financeProductForm")?.addEventListener("change", updateFinanceCalculationP
 byId("financeProductForm")?.addEventListener("submit", (event) => {
   event.preventDefault();
   const product = currentFinanceFormProduct();
-  product.id = `finance-${Date.now()}`;
-  state.financialProducts.push(product);
+  const existing = editingFinanceProductId ? state.financialProducts.find((item) => item.id === editingFinanceProductId) : null;
+  product.id = existing?.id || `finance-${Date.now()}`;
+  product.actualPayments = existing?.actualPayments || [];
+  if (product.type === "loan") {
+    const paidPrincipal = product.actualPayments.reduce((sum, payment) => sum + Number(payment.principalPart || 0), 0);
+    const enteredCurrentBalance = Number(event.currentTarget.elements.openingBalance.value);
+    product.openingBalance = (Number.isFinite(enteredCurrentBalance) && enteredCurrentBalance >= 0 ? enteredCurrentBalance : product.principal) + paidPrincipal;
+  }
+  const existingIndex = state.financialProducts.findIndex((item) => item.id === product.id);
+  if (existingIndex >= 0) state.financialProducts[existingIndex] = product;
+  else state.financialProducts.push(product);
 
   if (product.type === "loan" && !state.categories.some((item) => normalizeBrandText(item.name) === normalizeBrandText(product.expenseCategory))) {
     state.categories.push({ id: `category-${Date.now()}-loan`, name: product.expenseCategory, project: "", icon: "credit", categoryType: "expense" });
@@ -3450,6 +3582,7 @@ byId("financeProductForm")?.addEventListener("submit", (event) => {
 
   saveState();
   byId("financeProductDialog").close();
+  editingFinanceProductId = null;
   render();
   setView("finance-products");
 });
@@ -4119,6 +4252,25 @@ byId("refreshMoscowPmBtn")?.addEventListener("click", () => requestMoscowChildMi
 byId("alimonyRuleForm")?.elements?.effectiveFrom?.addEventListener("change", () => requestMoscowChildMinimum());
 
 
+// Editable automatic monthly payment
+byId("financeProductForm")?.addEventListener("input", (event) => {
+  const field = event.target;
+  const form = event.currentTarget;
+  if (field.name === "monthlyPaymentOverride") {
+    field.dataset.manual = field.value.trim() ? "true" : "false";
+    updateFinanceCalculationPreview();
+    return;
+  }
+  if (!["principal", "rate", "rateMode", "termMonths", "paymentType"].includes(field.name)) return;
+  const paymentField = form.elements.monthlyPaymentOverride;
+  if (!paymentField || paymentField.dataset.manual === "true") return;
+  const product = currentFinanceFormProduct();
+  if (product.type === "loan") {
+    paymentField.value = calculateLoan({...product, monthlyPaymentOverride: 0}).monthlyPayment.toFixed(2);
+    updateFinanceCalculationPreview();
+  }
+});
+
 // ===== Package 2: regular money, payment calendar and actual loan balance =====
 let editingRegularPaymentId = null;
 const regularTypeLabels = {utilities:"Коммунальные",education:"Кружки и школа",subscription:"Подписка",tax:"Налог",insurance:"Страховка",loan:"Кредит",other:"Прочее"};
@@ -4126,7 +4278,7 @@ function dateLocal(d){ const x=new Date(d.getTime()-d.getTimezoneOffset()*60000)
 function addFrequency(dateText, frequency, step=1){ const d=new Date(`${dateText}T00:00:00`); if(frequency==='weekly') d.setDate(d.getDate()+7*step); else {const m={monthly:1,quarterly:3,halfyear:6,yearly:12}[frequency]||0; d.setMonth(d.getMonth()+m*step);} return dateLocal(d); }
 function regularOccurrences(monthsBack=3, monthsForward=15){
  const now=new Date(); const from=new Date(now.getFullYear(),now.getMonth()-monthsBack,1); const to=new Date(now.getFullYear(),now.getMonth()+monthsForward+1,0); const out=[];
- state.regularPayments.filter(x=>x.autoPlan!==false).forEach(t=>{ let date=t.startDate; let guard=0; while(date && guard++<800){const d=new Date(`${date}T00:00:00`); if(t.endDate && date>t.endDate) break; if(d>to) break; if(d>=from){const id=`${t.id}@${date}`; const saved=state.plannedPaymentStates[id]||{}; out.push({...t, occurrenceId:id, dueDate:date, ...saved});} if(t.frequency==='once') break; date=addFrequency(date,t.frequency,1); }});
+ state.regularPayments.filter(x=>x.autoPlan!==false).forEach(t=>{ let date=t.startDate; let guard=0; while(date && guard++<800){const d=new Date(`${date}T00:00:00`); if(t.endDate && date>t.endDate) break; if(d>to) break; if(d>=from){const id=`${t.id}@${date}`; const saved=state.plannedPaymentStates[id]||{}; out.push({...t, occurrenceId:id, dueDate:date, eventKind:'payment', ...saved});} if(t.frequency==='once') break; date=addFrequency(date,t.frequency,1); } if(t.paymentType==='utilities' && t.meterReadingStartDate){let meterDate=t.meterReadingStartDate;let meterGuard=0;while(meterDate&&meterGuard++<800){const md=new Date(`${meterDate}T00:00:00`);if(t.endDate&&meterDate>t.endDate)break;if(md>to)break;if(md>=from){const meterId=`${t.id}@meter@${meterDate}`;const meterSaved=state.plannedPaymentStates[meterId]||{};out.push({...t,name:`Показания: ${t.name}`,amount:0,occurrenceId:meterId,dueDate:meterDate,eventKind:'meter-reading',...meterSaved});}if(t.frequency==='once')break;meterDate=addFrequency(meterDate,t.frequency,1);}}});
  // Insurance annual obligations
  state.insurancePolicies.forEach(pol=>{ if(!pol.endDate) return; const id=`insurance@${pol.id}@${pol.endDate}`; const saved=state.plannedPaymentStates[id]||{}; const d=new Date(`${pol.endDate}T00:00:00`); if(d>=from&&d<=to) out.push({id:pol.id,occurrenceId:id,name:`Продление: ${pol.subjectName}`,paymentType:'insurance',amount:Number(pol.cost)||0,dueDate:pol.endDate,category:'Страхование',project:pol.project||'',...saved,systemGenerated:true}); });
  // Loan schedule obligations
@@ -4144,20 +4296,26 @@ function renderRegularMoney(){
  const today=new Date(), todayText=dateLocal(today), next30=dateLocal(new Date(today.getFullYear(),today.getMonth(),today.getDate()+30)); const upcoming=all.filter(o=>!['paid'].includes(occurrenceStatus(o))&&o.dueDate>=todayText&&o.dueDate<=next30); const overdue=all.filter(o=>occurrenceStatus(o)==='overdue'); const paid=all.filter(o=>occurrenceStatus(o)==='paid'&&String(o.paidDate||o.dueDate).startsWith(`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`));
  byId('regularNext30Total').textContent=money(upcoming.reduce((s,o)=>s+Number(o.amount||0),0)); byId('regularNext30Count').textContent=`${upcoming.length} платежей`; byId('regularOverdueTotal').textContent=money(overdue.reduce((s,o)=>s+Number(o.amount||0),0)); byId('regularOverdueCount').textContent=`${overdue.length} платежей`; byId('regularPaidTotal').textContent=money(paid.reduce((s,o)=>s+Number(o.paidAmount||o.amount||0),0)); byId('regularPaidCount').textContent=`${paid.length} платежей`;
 }
-function fillRegularDialog(t=null){ const f=byId('regularPaymentForm'); f.reset(); editingRegularPaymentId=t?.id||null; byId('regularPaymentDialogTitle').textContent=t?'Редактировать платёж':'Регулярный платёж'; const cats=categoryNamesByType('expense'); byId('regularCategorySelect').innerHTML=(cats.length?cats:['Обязательные платежи']).map(x=>`<option>${escapeHtml(x)}</option>`).join(''); byId('regularAccountSelect').innerHTML='<option value="">Не указан</option>'+state.accounts.map(a=>`<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`).join(''); const e=f.elements; e.startDate.value=t?.startDate||dateLocal(new Date()); e.remindDays.value=t?.remindDays??3; e.autoPlan.checked=t?.autoPlan!==false; if(t) Object.entries(t).forEach(([k,v])=>{if(e[k]&&k!=='autoPlan') e[k].value=v??'';}); byId('regularPaymentDialog').showModal(); }
+function updateRegularUtilityFields(){const f=byId('regularPaymentForm');const utility=f?.elements?.paymentType?.value==='utilities';document.querySelectorAll('.utility-only-field').forEach(el=>el.hidden=!utility);if(utility&&f.elements.meterReadingStartDate&&!f.elements.meterReadingStartDate.value){const base=f.elements.startDate.value?new Date(`${f.elements.startDate.value}T00:00:00`):new Date();base.setDate(Math.max(1,base.getDate()-5));f.elements.meterReadingStartDate.value=dateLocal(base);}}
+function fillRegularDialog(t=null){ const f=byId('regularPaymentForm'); f.reset(); editingRegularPaymentId=t?.id||null; byId('regularPaymentDialogTitle').textContent=t?'Редактировать платёж':'Регулярный платёж'; const cats=categoryNamesByType('expense'); byId('regularCategorySelect').innerHTML=(cats.length?cats:['Обязательные платежи']).map(x=>`<option>${escapeHtml(x)}</option>`).join(''); byId('regularAccountSelect').innerHTML='<option value="">Не указан</option>'+state.accounts.map(a=>`<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`).join(''); const e=f.elements; e.startDate.value=t?.startDate||dateLocal(new Date()); e.remindDays.value=t?.remindDays??3; e.autoPlan.checked=t?.autoPlan!==false; if(t) Object.entries(t).forEach(([k,v])=>{if(e[k]&&k!=='autoPlan') e[k].value=v??'';}); updateRegularUtilityFields(); byId('regularPaymentDialog').showModal(); }
 function candidateTransactions(o){return state.rows.filter(r=>Number(r.amount)<0&&Math.abs(Math.abs(Number(r.amount))-Number(o.amount||0))<=Math.max(5,Number(o.amount||0)*.03)&&Math.abs((new Date(r.date)-new Date(o.dueDate))/86400000)<=10).sort((a,b)=>Math.abs(new Date(a.date)-new Date(o.dueDate))-Math.abs(new Date(b.date)-new Date(o.dueDate))).slice(0,30);}
-function openPlannedPayment(id){const o=regularOccurrences().find(x=>x.occurrenceId===id); if(!o)return; const f=byId('plannedPaymentForm'), s=state.plannedPaymentStates[id]||{}; f.elements.occurrenceId.value=id; f.elements.paidDate.value=s.paidDate||dateLocal(new Date()); f.elements.paidAmount.value=s.paidAmount||o.amount||''; f.elements.comment.value=s.comment||''; byId('plannedPaymentSubtitle').textContent=`${o.name} • срок ${formatTransactionDate(o.dueDate)} • ${money(o.amount)}`; const candidates=candidateTransactions(o); byId('plannedTransactionSelect').innerHTML='<option value="">Не связывать</option>'+candidates.map(r=>`<option value="${escapeHtml(r.id)}">${formatTransactionDate(r.date)} • ${escapeHtml(r.description)} • ${money(Math.abs(r.amount))}</option>`).join(''); byId('plannedTransactionSelect').value=s.transactionId||''; byId('plannedPaymentDialog').showModal();}
+function openPlannedPayment(id){const o=regularOccurrences().find(x=>x.occurrenceId===id); if(!o)return; const f=byId('plannedPaymentForm'), s=state.plannedPaymentStates[id]||{}; f.elements.occurrenceId.value=id; f.elements.paidDate.value=s.paidDate||dateLocal(new Date()); f.elements.paidAmount.value=s.paidAmount||o.amount||''; f.elements.paidAmount.closest('label').hidden=o.eventKind==='meter-reading'; f.elements.comment.value=s.comment||''; byId('plannedPaymentSubtitle').textContent=o.eventKind==='meter-reading'?`${o.name} • передать до ${formatTransactionDate(o.dueDate)}`:`${o.name} • срок ${formatTransactionDate(o.dueDate)} • ${money(o.amount)}`; const candidates=candidateTransactions(o); byId('plannedTransactionSelect').innerHTML='<option value="">Не связывать</option>'+candidates.map(r=>`<option value="${escapeHtml(r.id)}">${formatTransactionDate(r.date)} • ${escapeHtml(r.description)} • ${money(Math.abs(r.amount))}</option>`).join(''); byId('plannedTransactionSelect').value=s.transactionId||''; byId('plannedPaymentDialog').showModal();}
 function loanActualPayments(product){return Array.isArray(product.actualPayments)?product.actualPayments:[];}
-function loanRemaining(product){const principal=Number(product.principal)||0; return Math.max(0,principal-loanActualPayments(product).reduce((s,p)=>s+Number(p.principalPart||0),0));}
-function addLoanPaymentButton(card, product){return card.replace('</article>',`<div class="loan-actions"><button class="ghost add-loan-payment" data-product-id="${escapeHtml(product.id)}">+ Платёж</button><small>Фактических платежей: ${loanActualPayments(product).length}</small></div></article>`)}
+function loanRemaining(product){const base=Number(product.openingBalance ?? product.principal)||0; return Math.max(0,base-loanActualPayments(product).reduce((s,p)=>s+Number(p.principalPart||0),0));}
+function addLoanPaymentButton(card, product){return card.replace('</article>',`<div class="loan-actions"><div><button class="ghost add-loan-payment" data-product-id="${escapeHtml(product.id)}">+ Платёж</button><button class="ghost edit-finance-product" data-product-id="${escapeHtml(product.id)}">Редактировать</button></div><small>Фактических платежей: ${loanActualPayments(product).length}</small></div></article>`)}
 const _financeProductCardPkg2=financeProductCard;
-financeProductCard=function(product){let h=_financeProductCardPkg2(product); if(product.type==='loan'){h=h.replace(`<div><span>Сумма</span><strong>${money(product.principal)}</strong></div>`,`<div><span>Первоначальная сумма</span><strong>${money(product.principal)}</strong></div><div><span>Остаток долга</span><strong>${money(loanRemaining(product))}</strong></div>`); h=addLoanPaymentButton(h,product);} return h;};
+financeProductCard=function(product){let h=_financeProductCardPkg2(product); if(product.type==='loan'){const calc=calculateLoan(product);const payment=Number(product.monthlyPaymentOverride)||calc.monthlyPayment; h=h.replace(`<div><span>Сумма</span><strong>${money(product.principal)}</strong></div>`,`<div><span>Первоначальный платёж</span><strong>${money(product.downPayment||0)}</strong></div><div><span>Сумма кредита</span><strong>${money(product.principal)}</strong></div><div><span>Остаток долга</span><strong>${money(loanRemaining(product))}</strong></div>`).replace(`<div><span>Платёж в месяц</span><strong>${money(calc.monthlyPayment)}</strong></div>`,`<div><span>Платёж в месяц</span><strong>${money(payment)}</strong></div>`); h=addLoanPaymentButton(h,product);} return h;};
 const _renderFinanceProductsPkg2=renderFinanceProducts;
 renderFinanceProducts=function(){_renderFinanceProductsPkg2(); const loans=state.financialProducts.filter(x=>x.type==='loan'); byId('loanBalanceTotal').textContent=money(loans.reduce((s,x)=>s+loanRemaining(x),0));};
+
+byId('openReviewCenterBtn')?.addEventListener('click',()=>{renderReviewCenter();byId('reviewCenterDialog')?.showModal();});
+byId('regularPaymentForm')?.elements?.paymentType?.addEventListener('change',updateRegularUtilityFields);
+document.addEventListener('click',(event)=>{const button=event.target.closest('.open-review-item');if(!button)return;byId('reviewCenterDialog')?.close();if(button.dataset.reviewKind==='operation'){showOperationDetails(button.dataset.reviewId);return;}if(button.dataset.reviewKind==='planned'){openPlannedPayment(button.dataset.reviewId);return;}if(button.dataset.reviewKind==='insurance'){setView('insurance');setTimeout(()=>{const card=[...document.querySelectorAll('.edit-insurance')].find(el=>el.dataset.policyId===button.dataset.reviewId);card?.click();},50);}});
+
 byId('addRegularPaymentBtn')?.addEventListener('click',()=>fillRegularDialog());
 ['regularMonthFilter','regularTypeFilter','regularStatusFilter'].forEach(id=>byId(id)?.addEventListener('change',renderRegularMoney));
-byId('regularPaymentForm')?.addEventListener('submit',e=>{e.preventDefault(); const f=e.currentTarget,d=Object.fromEntries(new FormData(f).entries()); const obj={id:editingRegularPaymentId||`regular-${Date.now()}`,name:d.name,paymentType:d.paymentType,amount:Number(d.amount)||0,frequency:d.frequency,startDate:d.startDate,endDate:d.endDate||'',category:d.category||'',account:d.account||'',project:d.project||'',payee:d.payee||'',remindDays:Number(d.remindDays)||0,autoPlan:d.autoPlan==='true'}; const i=state.regularPayments.findIndex(x=>x.id===obj.id); if(i>=0)state.regularPayments[i]=obj;else state.regularPayments.push(obj); saveState(); byId('regularPaymentDialog').close(); render(); setView('calendar');});
-document.addEventListener('click',e=>{const edit=e.target.closest('.edit-regular-payment'); if(edit){fillRegularDialog(state.regularPayments.find(x=>x.id===edit.dataset.templateId));return;} const del=e.target.closest('.delete-regular-payment'); if(del&&confirm('Удалить шаблон и будущие платежи?')){state.regularPayments=state.regularPayments.filter(x=>x.id!==del.dataset.templateId);saveState();renderRegularMoney();return;} const open=e.target.closest('.open-planned-payment'); if(open){openPlannedPayment(open.dataset.occurrenceId);return;} const lp=e.target.closest('.add-loan-payment'); if(lp){const p=state.financialProducts.find(x=>x.id===lp.dataset.productId); const f=byId('loanPaymentForm');f.reset();f.elements.productId.value=p.id;f.elements.date.value=dateLocal(new Date()); const candidates=state.rows.filter(r=>Number(r.amount)<0).slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,100);byId('loanTransactionSelect').innerHTML='<option value="">Не связывать</option>'+candidates.map(r=>`<option value="${escapeHtml(r.id)}">${formatTransactionDate(r.date)} • ${escapeHtml(r.description)} • ${money(Math.abs(r.amount))}</option>`).join('');byId('loanPaymentDialog').showModal();}});
-byId('plannedPaymentForm')?.addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());state.plannedPaymentStates[d.occurrenceId]={paidDate:d.paidDate||dateLocal(new Date()),paidAmount:Number(d.paidAmount)||0,transactionId:d.transactionId||'',comment:d.comment||''};saveState();byId('plannedPaymentDialog').close();render();});
+byId('regularPaymentForm')?.addEventListener('submit',e=>{e.preventDefault(); const f=e.currentTarget,d=Object.fromEntries(new FormData(f).entries()); const obj={id:editingRegularPaymentId||`regular-${Date.now()}`,name:d.name,paymentType:d.paymentType,amount:Number(d.amount)||0,frequency:d.frequency,startDate:d.startDate,endDate:d.endDate||'',category:d.category||'',account:d.account||'',project:d.project||'',payee:d.payee||'',meterReadingStartDate:d.meterReadingStartDate||'',remindDays:Number(d.remindDays)||0,autoPlan:d.autoPlan==='true'}; const i=state.regularPayments.findIndex(x=>x.id===obj.id); if(i>=0)state.regularPayments[i]=obj;else state.regularPayments.push(obj); saveState(); byId('regularPaymentDialog').close(); render(); setView('calendar');});
+document.addEventListener('click',e=>{const edit=e.target.closest('.edit-regular-payment'); if(edit){fillRegularDialog(state.regularPayments.find(x=>x.id===edit.dataset.templateId));return;} const del=e.target.closest('.delete-regular-payment'); if(del&&confirm('Удалить шаблон и будущие платежи?')){state.regularPayments=state.regularPayments.filter(x=>x.id!==del.dataset.templateId);saveState();renderRegularMoney();return;} const open=e.target.closest('.open-planned-payment'); if(open){openPlannedPayment(open.dataset.occurrenceId);return;} const fp=e.target.closest('.edit-finance-product'); if(fp){const product=state.financialProducts.find(x=>x.id===fp.dataset.productId);if(product)openFinanceProductDialog(product);return;} const lp=e.target.closest('.add-loan-payment'); if(lp){const p=state.financialProducts.find(x=>x.id===lp.dataset.productId); const f=byId('loanPaymentForm');f.reset();f.elements.productId.value=p.id;f.elements.date.value=dateLocal(new Date()); const candidates=state.rows.filter(r=>Number(r.amount)<0).slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,100);byId('loanTransactionSelect').innerHTML='<option value="">Не связывать</option>'+candidates.map(r=>`<option value="${escapeHtml(r.id)}">${formatTransactionDate(r.date)} • ${escapeHtml(r.description)} • ${money(Math.abs(r.amount))}</option>`).join('');byId('loanPaymentDialog').showModal();}});
+byId('plannedPaymentForm')?.addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());state.plannedPaymentStates[d.occurrenceId]={paidDate:d.paidDate||dateLocal(new Date()),paidAmount:d.paidAmount===''?0:Number(d.paidAmount)||0,transactionId:d.transactionId||'',comment:d.comment||''};saveState();byId('plannedPaymentDialog').close();render();});
 byId('markPlannedUnpaidBtn')?.addEventListener('click',()=>{const id=byId('plannedPaymentForm').elements.occurrenceId.value;delete state.plannedPaymentStates[id];saveState();byId('plannedPaymentDialog').close();render();});
 byId('loanPaymentForm')?.addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());const p=state.financialProducts.find(x=>x.id===d.productId);if(!p)return;const amount=Number(d.amount)||0;let principalPart=Number(d.principalPart)||0;if(!principalPart){const monthlyInterest=loanRemaining(p)*ratePerMonth(p);principalPart=Math.max(0,Math.min(loanRemaining(p),amount-monthlyInterest));if(d.paymentKind==='early')principalPart=Math.min(loanRemaining(p),amount);}p.actualPayments=[...loanActualPayments(p),{id:`loan-payment-${Date.now()}`,date:d.date,amount,paymentKind:d.paymentKind,principalPart,interestPart:Math.max(0,amount-principalPart),transactionId:d.transactionId||'',comment:d.comment||''}];saveState();byId('loanPaymentDialog').close();render();setView('finance-products');});
