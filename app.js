@@ -2078,37 +2078,77 @@ function openReceiptEditor(receipt) {
   byId("receiptDialog").showModal();
 }
 
-byId("pasteReceiptQrBtn")?.addEventListener("click", () => {
-  const raw = window.prompt("Вставьте строку из QR кассового чека. Обычно она начинается с t=...&s=...&fn=...");
-  if (!raw) return;
+
+let pendingQrImageUrl = "";
+
+function openQrPasteDialog(statusText = "Вставьте строку QR кассового чека.") {
+  byId("qrPasteText").value = "";
+  byId("qrPasteStatus").textContent = statusText;
+  byId("qrPhotoFallback").hidden = true;
+  if (pendingQrImageUrl) {
+    URL.revokeObjectURL(pendingQrImageUrl);
+    pendingQrImageUrl = "";
+  }
+  byId("qrPasteDialog").showModal();
+  setTimeout(() => byId("qrPasteText").focus(), 50);
+}
+
+function processReceiptQrText(raw) {
+  const receipt = parseFiscalReceiptQr(raw);
+  const duplicate = state.rows.find((row) => row.receipt?.fiscalKey && row.receipt.fiscalKey === receipt.fiscalKey);
+  if (duplicate) throw new Error(`Этот чек уже добавлен: ${duplicate.date}, ${duplicate.description}, ${money(Math.abs(duplicate.amount))}.`);
+  byId("qrPasteDialog")?.close();
+  openReceiptEditor(receipt);
+  byId("importResult").textContent = "Кассовый QR распознан. Проверьте данные и сохраните расход.";
+}
+
+byId("pasteReceiptQrBtn")?.addEventListener("click", () => openQrPasteDialog());
+byId("txPasteReceiptBtn")?.addEventListener("click", () => openQrPasteDialog());
+
+byId("qrPasteForm")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const raw = byId("qrPasteText").value.trim();
+  if (!raw) {
+    byId("qrPasteStatus").textContent = "Вставьте строку QR.";
+    return;
+  }
   try {
-    const receipt = parseFiscalReceiptQr(raw);
-    const duplicate = state.rows.find((row) => row.receipt?.fiscalKey && row.receipt.fiscalKey === receipt.fiscalKey);
-    if (duplicate) throw new Error(`Этот чек уже добавлен: ${duplicate.date}, ${duplicate.description}, ${money(Math.abs(duplicate.amount))}.`);
-    openReceiptEditor(receipt);
-    byId("importResult").textContent = "Строка кассового QR распознана. Проверьте данные.";
+    processReceiptQrText(raw);
   } catch (error) {
-    byId("importResult").textContent = `Чек не добавлен: ${error.message || error}`;
+    byId("qrPasteStatus").textContent = `Чек не распознан: ${error.message || error}`;
   }
 });
 
-byId("receiptQrInput")?.addEventListener("change", async (event) => {
-  const file = event.target.files?.[0];
+async function handleReceiptImage(file) {
   if (!file) return;
   byId("importResult").textContent = `Сканирую кассовый QR из ${file.name}...`;
   try {
     const raw = await parseQrFile(file);
-    if (!raw) throw new Error("QR-код не найден. Сфотографируйте чек крупнее, без бликов и строго сверху.");
-    const receipt = parseFiscalReceiptQr(raw.split(/\r?\n/).find((line) => /(?:^|[?&])(?:fn|s|t)=/i.test(line)) || raw);
-    const duplicate = state.rows.find((row) => row.receipt?.fiscalKey && row.receipt.fiscalKey === receipt.fiscalKey);
-    if (duplicate) throw new Error(`Этот чек уже добавлен: ${duplicate.date}, ${duplicate.description}, ${money(Math.abs(duplicate.amount))}.`);
-    openReceiptEditor(receipt);
-    byId("importResult").textContent = "Кассовый QR распознан. Проверьте данные в открывшейся форме.";
+    if (!raw) throw new Error("QR-код не найден.");
+    const qrLine = raw.split(/\r?\n/).find((line) => /(?:^|[?&])(?:fn|s|t)=/i.test(line)) || raw;
+    processReceiptQrText(qrLine);
   } catch (error) {
-    byId("importResult").textContent = `Чек не добавлен: ${error.message || error}`;
-  } finally {
-    event.target.value = "";
+    openQrPasteDialog("Автоматически прочитать фото не удалось. Скопируйте строку QR через Google Lens и вставьте ниже.");
+    pendingQrImageUrl = URL.createObjectURL(file);
+    byId("qrPhotoPreview").src = pendingQrImageUrl;
+    byId("qrPhotoFallback").hidden = false;
+    byId("qrPasteStatus").textContent = `Фото выбрано: ${file.name}. ${error.message || error}`;
+    byId("importResult").textContent = "Фото открыто в резервном режиме ручной вставки QR.";
   }
+}
+
+byId("receiptQrInput")?.addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  await handleReceiptImage(file);
+  event.target.value = "";
+});
+
+byId("txScanReceiptBtn")?.addEventListener("click", () => byId("txReceiptQrInput")?.click());
+byId("txReceiptQrInput")?.addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  byId("txDialog")?.close();
+  await handleReceiptImage(file);
+  event.target.value = "";
 });
 
 byId("addReceiptItem")?.addEventListener("click", () => addReceiptItemRow());

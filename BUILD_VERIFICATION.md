@@ -1,0 +1,33 @@
+# Проверка сборки
+
+- ✅ HTML ID receiptQrInput — count=1
+- ✅ HTML ID txReceiptQrInput — count=1
+- ✅ HTML ID txScanReceiptBtn — count=1
+- ✅ HTML ID txPasteReceiptBtn — count=1
+- ✅ HTML ID qrPasteDialog — count=1
+- ✅ HTML ID qrPasteForm — count=1
+- ✅ HTML ID qrPasteText — count=1
+- ✅ HTML ID receiptDialog — count=1
+- ✅ HTML ID receiptForm — count=1
+- ✅ Reference ./manifest.webmanifest — manifest.webmanifest
+- ✅ Reference ./favicon.ico — favicon.ico
+- ✅ Reference ./assets/app-icons/app-icon-192.png — assets/app-icons/app-icon-192.png
+- ✅ Reference ./assets/app-icons/app-icon-180.png — assets/app-icons/app-icon-180.png
+- ✅ Reference ./styles.css — styles.css
+- ✅ Reference ./andromoney-data.js — andromoney-data.js
+- ✅ Reference ./app.js — app.js
+- ✅ JS references receiptQrInput
+- ✅ JS references txReceiptQrInput
+- ✅ JS references txScanReceiptBtn
+- ✅ JS references txPasteReceiptBtn
+- ✅ JS references qrPasteDialog
+- ✅ JS references qrPasteForm
+- ✅ JS references qrPasteText
+- ✅ JS references receiptDialog
+- ✅ JS references receiptForm
+- ✅ Android mipmap-mdpi launcher — (48, 48)
+- ✅ Android mipmap-hdpi launcher — (72, 72)
+- ✅ Android mipmap-xhdpi launcher — (96, 96)
+- ✅ Android mipmap-xxhdpi launcher — (144, 144)
+- ✅ Android mipmap-xxxhdpi launcher — (192, 192)
+- ✅ Alzex data retained — rows=185
