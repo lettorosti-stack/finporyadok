@@ -1331,3 +1331,44 @@ dialog menu {
 .insurance-year-card{padding:14px;border-radius:16px;background:#fff;border:1px solid rgba(15,118,110,.12);box-shadow:0 8px 22px rgba(15,23,42,.06)}
 .insurance-year-card span,.insurance-year-card small{display:block;color:var(--muted)}
 .insurance-year-card strong{display:block;font-size:1.15rem;margin:4px 0}
+
+/* Insurance card actions: compact icon controls */
+.insurance-card-actions{
+  display:flex;
+  justify-content:flex-end;
+  align-items:center;
+  gap:8px;
+  width:100%;
+  margin-top:12px;
+}
+.insurance-action-icon{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  flex:0 0 40px;
+  width:40px;
+  height:40px;
+  min-width:40px;
+  padding:0;
+  border:1px solid rgba(15,118,110,.18);
+  border-radius:12px;
+  background:rgba(255,255,255,.92);
+  box-shadow:0 5px 14px rgba(15,23,42,.06);
+  font-size:18px;
+  line-height:1;
+  cursor:pointer;
+  transition:transform .15s ease,box-shadow .15s ease,background .15s ease;
+}
+.insurance-action-icon:hover{
+  transform:translateY(-1px);
+  background:#fff;
+  box-shadow:0 8px 18px rgba(15,23,42,.1);
+}
+.insurance-action-icon:active{transform:translateY(0)}
+.insurance-action-icon:focus-visible{outline:3px solid rgba(15,118,110,.24);outline-offset:2px}
+.insurance-action-icon.is-muted{opacity:.72}
+.insurance-action-icon:disabled{opacity:.38;cursor:not-allowed;box-shadow:none;transform:none}
+@media(max-width:420px){
+  .insurance-card-actions{gap:7px}
+  .insurance-action-icon{flex-basis:38px;width:38px;height:38px;min-width:38px;border-radius:11px}
+}

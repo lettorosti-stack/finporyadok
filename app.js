@@ -1249,10 +1249,12 @@ function insuranceCard(policy) {
       <div><span>Проект</span><strong>${escapeHtml(policy.project || "Не указан")}</strong><small>${escapeHtml(policy.familyMember || "")}</small></div>
       <div><span>Стоимость</span><strong>${money(policy.cost)}</strong><small>${formatTransactionDate(policy.startDate)} — ${formatTransactionDate(policy.endDate)}</small></div>
     </div>
-    <div class="insurance-card-actions">
-      ${policy.pdfStored ? `<button class="ghost open-insurance-pdf" data-policy-id="${escapeHtml(policy.id)}" type="button">Открыть PDF</button>` : `<span class="muted">PDF не загружен</span>`}
-      <button class="ghost edit-insurance" data-policy-id="${escapeHtml(policy.id)}" type="button">Редактировать</button>
-      <button class="ghost toggle-insurance-reminder" data-policy-id="${escapeHtml(policy.id)}" type="button">${policy.reminderDisabled ? "Включить уведомления" : "Отключить уведомления"}</button>
+    <div class="insurance-card-actions" aria-label="Действия с полисом">
+      ${policy.pdfStored
+        ? `<button class="insurance-action-icon open-insurance-pdf" data-policy-id="${escapeHtml(policy.id)}" type="button" title="Открыть PDF" aria-label="Открыть PDF">📄</button>`
+        : `<button class="insurance-action-icon" type="button" title="PDF не загружен" aria-label="PDF не загружен" disabled>📄</button>`}
+      <button class="insurance-action-icon edit-insurance" data-policy-id="${escapeHtml(policy.id)}" type="button" title="Редактировать полис" aria-label="Редактировать полис">✏️</button>
+      <button class="insurance-action-icon toggle-insurance-reminder ${policy.reminderDisabled ? "is-muted" : ""}" data-policy-id="${escapeHtml(policy.id)}" type="button" title="${policy.reminderDisabled ? "Включить уведомления" : "Отключить уведомления"}" aria-label="${policy.reminderDisabled ? "Включить уведомления" : "Отключить уведомления"}">${policy.reminderDisabled ? "🔔" : "🔕"}</button>
     </div>
   </article>`;
 }
@@ -3105,6 +3107,7 @@ byId("exportWorkReportBtn")?.addEventListener("click",()=>{const rows=filteredWo
 
 const MOSCOW_PM_SEARCH_URL = "https://www.garant.ru/search/?q=%D0%B2%D0%B5%D0%BB%D0%B8%D1%87%D0%B8%D0%BD%D0%B0%20%D0%BF%D1%80%D0%BE%D0%B6%D0%B8%D1%82%D0%BE%D1%87%D0%BD%D0%BE%D0%B3%D0%BE%20%D0%BC%D0%B8%D0%BD%D0%B8%D0%BC%D1%83%D0%BC%D0%B0%20%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0%20%D0%B4%D0%BB%D1%8F%20%D0%B4%D0%B5%D1%82%D0%B5%D0%B9";
 let moscowPmRequestInProgress = false;
+let moscowPmRequestTimeout = null;
 
 function currentAlimonyPeriodKey() {
   const raw = byId("alimonyRuleForm")?.elements?.effectiveFrom?.value || "";
@@ -3118,12 +3121,30 @@ function alimonyPmPeriodLabel(key) {
   return `${Math.ceil(month/3)} квартал ${year} года`;
 }
 
+function alimonyPmCacheKey(periodKey) {
+  const [yearRaw, monthRaw] = String(periodKey || "").split("-");
+  const year = Number(yearRaw); const month = Math.max(1, Math.min(12, Number(monthRaw) || 1));
+  if (year >= 2021) return `year:${year}`;
+  if (year >= 2013) return `half:${year}:${month <= 6 ? 1 : 2}`;
+  return `quarter:${year}:${Math.ceil(month / 3)}`;
+}
+function cachedOfficialPm(periodKey) {
+  const year = Number(String(periodKey).slice(0,4));
+  const canonicalKey = alimonyPmCacheKey(periodKey);
+  return state.officialSubsistenceByPeriod?.[canonicalKey]
+    || state.officialSubsistenceByPeriod?.[periodKey]
+    || state.officialSubsistenceByYear?.[String(year)]
+    || (Number(state.officialSubsistenceData?.year) === year ? state.officialSubsistenceData : null);
+}
 function officialPmIsFresh(data, periodKey) {
   if (!data || !Number(data.amount)) return false;
-  if (data.periodKey && data.periodKey !== periodKey) return false;
-  if (!data.periodKey && Number(data.year) !== Number(periodKey.slice(0,4))) return false;
+  const dataKey = data.cacheKey || alimonyPmCacheKey(data.periodKey || `${data.year}-01`);
+  if (dataKey !== alimonyPmCacheKey(periodKey)) return false;
   const fetched = new Date(data.fetchedAt || 0).getTime();
-  return fetched && Date.now() - fetched < 30 * 86400000;
+  // Установленная величина за завершённый период не меняется. Для текущего года перепроверяем раз в 90 дней.
+  const currentYear = new Date().getFullYear();
+  if (Number(data.year) < currentYear) return true;
+  return fetched && Date.now() - fetched < 90 * 86400000;
 }
 
 function setMoscowPmStatus(message, tone = "info") {
@@ -3150,7 +3171,8 @@ function applyOfficialMoscowPm(data, { save = true } = {}) {
   if (save) {
     const normalized = { ...data, region: data.region || "Москва" };
     state.officialSubsistenceData = normalized;
-    const key = normalized.periodKey || `${normalized.year}-01`;
+    const key = normalized.cacheKey || alimonyPmCacheKey(normalized.periodKey || `${normalized.year}-01`);
+    normalized.cacheKey = key;
     state.officialSubsistenceByPeriod = { ...(state.officialSubsistenceByPeriod || {}), [key]: normalized };
     state.officialSubsistenceByYear = { ...(state.officialSubsistenceByYear || {}), [String(data.year)]: normalized };
     saveState();
@@ -3161,42 +3183,58 @@ function applyOfficialMoscowPm(data, { save = true } = {}) {
 
 function requestMoscowChildMinimum({ force = false } = {}) {
   const periodKey = currentAlimonyPeriodKey();
-  const year = Number(periodKey.slice(0,4));
-  const cached = state.officialSubsistenceByPeriod?.[periodKey] || state.officialSubsistenceByYear?.[String(year)] || (Number(state.officialSubsistenceData?.year) === year ? state.officialSubsistenceData : null);
-  if (!force && officialPmIsFresh(cached, periodKey)) {
+  const cached = cachedOfficialPm(periodKey);
+
+  // Сначала мгновенно показываем сохранённое значение. Интернет не блокирует форму.
+  if (cached && Number(cached.amount)) {
     applyOfficialMoscowPm(cached, { save: false });
-    return;
+    if (!force && officialPmIsFresh(cached, periodKey)) return;
+    if (!force) {
+      setMoscowPmStatus(`Используется сохранённое значение ${money(Number(cached.amount))}. Проверить обновление можно кнопкой «Обновить».`, "success");
+      return;
+    }
   }
   if (moscowPmRequestInProgress) return;
   moscowPmRequestInProgress = true;
-  setMoscowPmStatus(`Ищу прожиточный минимум Москвы за ${alimonyPmPeriodLabel(periodKey)}…`);
+  setMoscowPmStatus(`Быстро проверяю ${alimonyPmPeriodLabel(periodKey)}… Обычно это занимает до 12 секунд.`);
   const button = byId("refreshMoscowPmBtn");
   if (button) button.disabled = true;
+  clearTimeout(moscowPmRequestTimeout);
+  moscowPmRequestTimeout = setTimeout(() => {
+    if (!moscowPmRequestInProgress) return;
+    window.onMoscowChildMinimumError("Поиск превысил 12 секунд");
+  }, 12500);
 
   if (window.AndroidOfficialDataBridge?.fetchMoscowChildMinimum) {
     window.AndroidOfficialDataBridge.fetchMoscowChildMinimum(periodKey);
     return;
   }
 
-  fetch(MOSCOW_PM_SEARCH_URL, { headers: { "Accept": "text/html" } })
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  fetch(MOSCOW_PM_SEARCH_URL, { headers: { "Accept": "text/html" }, signal: controller.signal })
     .then((response) => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return response.text();
     })
     .then((html) => {
       const text = html.replace(/<[^>]+>/g, " ").replace(/&nbsp;|&#160;/g, " ").replace(/\s+/g, " ");
-      const amountMatch = text.match(/(?:для\s+детей|дети)[^\d]{0,120}(\d{2}[\s\u00a0]?\d{3})\s*(?:руб|₽)/i);
-      if (!amountMatch) throw new Error("На официальной странице значение не найдено");
+      const amountMatch = text.match(/(?:для\s+детей|дети)[^\d]{0,120}(\d{2}[\s ]?\d{3})\s*(?:руб|₽)/i);
+      if (!amountMatch) throw new Error("Значение не найдено");
+      const year = Number(periodKey.slice(0,4));
       window.onMoscowChildMinimumLoaded(JSON.stringify({
-        region: "Москва", year, periodKey, periodLabel: alimonyPmPeriodLabel(periodKey), amount: Number(amountMatch[1].replace(/\s/g,"")),
-        decreeNumber: "", decreeUrl: MOSCOW_PM_SEARCH_URL, fetchedAt: new Date().toISOString(), source: "ГАРАНТ / правовой портал"
+        region: "Москва", year, periodKey, cacheKey: alimonyPmCacheKey(periodKey), periodLabel: alimonyPmPeriodLabel(periodKey),
+        amount: Number(amountMatch[1].replace(/\s/g,"")), decreeNumber: "", decreeUrl: MOSCOW_PM_SEARCH_URL,
+        fetchedAt: new Date().toISOString(), source: "ГАРАНТ"
       }));
     })
-    .catch((error) => window.onMoscowChildMinimumError(error.message || String(error)));
+    .catch((error) => window.onMoscowChildMinimumError(error.name === "AbortError" ? "Сайт не ответил за 8 секунд" : (error.message || String(error))))
+    .finally(() => clearTimeout(timer));
 }
 
 window.onMoscowChildMinimumLoaded = function(payload) {
   moscowPmRequestInProgress = false;
+  clearTimeout(moscowPmRequestTimeout);
   const button = byId("refreshMoscowPmBtn");
   if (button) button.disabled = false;
   try {
@@ -3209,11 +3247,11 @@ window.onMoscowChildMinimumLoaded = function(payload) {
 
 window.onMoscowChildMinimumError = function(message) {
   moscowPmRequestInProgress = false;
+  clearTimeout(moscowPmRequestTimeout);
   const button = byId("refreshMoscowPmBtn");
   if (button) button.disabled = false;
   const periodKey = currentAlimonyPeriodKey();
-  const year = Number(periodKey.slice(0,4));
-  const cached = state.officialSubsistenceByPeriod?.[periodKey] || state.officialSubsistenceByYear?.[String(year)] || (Number(state.officialSubsistenceData?.year) === year ? state.officialSubsistenceData : null);
+  const cached = cachedOfficialPm(periodKey);
   if (cached && Number(cached.amount)) {
     applyOfficialMoscowPm(cached, { save: false });
     setMoscowPmStatus(`Не удалось проверить обновление. Используется последнее официальное значение ${money(Number(cached.amount))}.`, "warning");
