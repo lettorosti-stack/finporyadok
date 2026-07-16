@@ -13,6 +13,8 @@ const state = {
   financialProducts: Array.isArray(savedState.financialProducts) ? savedState.financialProducts : [],
   insurancePolicies: Array.isArray(savedState.insurancePolicies) ? savedState.insurancePolicies : [],
   alimonyRules: Array.isArray(savedState.alimonyRules) ? savedState.alimonyRules : [],
+  regularPayments: Array.isArray(savedState.regularPayments) ? savedState.regularPayments : [],
+  plannedPaymentStates: savedState.plannedPaymentStates && typeof savedState.plannedPaymentStates === "object" ? savedState.plannedPaymentStates : {},
   officialSubsistenceData: savedState.officialSubsistenceData || null,
   officialSubsistenceByYear: savedState.officialSubsistenceByYear && typeof savedState.officialSubsistenceByYear === "object" ? savedState.officialSubsistenceByYear : {},
   shopping: savedState.shopping.length ? savedState.shopping : [
@@ -34,6 +36,7 @@ const views = {
   reimbursements: ["Возмещение", "Рабочие расходы, авансовые отчёты и фактические компенсации."],
   accounts: ["Счета", "Последние остатки и активность по каждому счету."],
   budgets: ["Категории", "Отдельные справочники категорий расходов и доходов."],
+  calendar: ["Регулярные деньги", "Обязательные платежи, календарь и контроль оплаты."],
   "finance-products": ["Вклады и кредиты", "Проценты, платежи и итоговые суммы по финансовым продуктам."],
   insurance: ["Страховки", "Полисы семьи, имущества, автомобиля и спорта."],
   alimony: ["Алименты", "Отдельный учет начислений, поступлений и долга."],
@@ -55,11 +58,13 @@ function loadState() {
       financialProducts: Array.isArray(saved?.financialProducts) ? saved.financialProducts : [],
       insurancePolicies: Array.isArray(saved?.insurancePolicies) ? saved.insurancePolicies : [],
       alimonyRules: Array.isArray(saved?.alimonyRules) ? saved.alimonyRules : [],
+      regularPayments: Array.isArray(saved?.regularPayments) ? saved.regularPayments : [],
+      plannedPaymentStates: saved?.plannedPaymentStates && typeof saved.plannedPaymentStates === "object" ? saved.plannedPaymentStates : {},
       officialSubsistenceData: saved?.officialSubsistenceData || null,
       officialSubsistenceByYear: saved?.officialSubsistenceByYear && typeof saved.officialSubsistenceByYear === "object" ? saved.officialSubsistenceByYear : {}
     };
   } catch {}
-  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], financialProducts: [], insurancePolicies: [], alimonyRules: [] };
+  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], financialProducts: [], insurancePolicies: [], alimonyRules: [], regularPayments: [], plannedPaymentStates: {} };
 }
 
 function saveState() {
@@ -75,6 +80,8 @@ function saveState() {
     financialProducts: state.financialProducts,
     insurancePolicies: state.insurancePolicies,
     alimonyRules: state.alimonyRules,
+    regularPayments: state.regularPayments,
+    plannedPaymentStates: state.plannedPaymentStates,
     officialSubsistenceData: state.officialSubsistenceData,
     officialSubsistenceByYear: state.officialSubsistenceByYear
   }));
@@ -659,6 +666,7 @@ function render() {
   renderAccounts();
   renderBudgets();
   renderFinanceProducts();
+  renderRegularMoney();
   renderInsurance();
   renderInsuranceAlerts();
   renderWorkReimbursement();
@@ -1459,14 +1467,25 @@ function alimonyPaymentRows() {
 function confirmedAlimonyPayments() { return alimonyPaymentRows().filter(r=>r.paymentStatus==="confirmed"); }
 function buildAlimonyLedger() {
   const rules=alimonyRulesSorted(); if(!rules.length) return [];
-  const start=monthDate(rules[0].effectiveFrom); const end=new Date(); end.setHours(0,0,0,0); end.setDate(1);
+  const start=monthDate(rules[0].effectiveFrom);
+  // Алименты за месяц начисляются 1-го числа следующего месяца.
+  // Поэтому текущий незавершённый месяц в начисления не включается.
+  const now=new Date();
+  const end=new Date(now.getFullYear(), now.getMonth()-1, 1);
   const payments=confirmedAlimonyPayments(); const rows=[]; let carry=Number(rules[0].openingDebt)||0;
   for(let d=new Date(start); d<=end; d.setMonth(d.getMonth()+1)){
     const key=monthKey(d), rule=alimonyRuleForMonth(key); if(!rule) continue;
     const accrued=(Number(rule.childrenCount)||1)*(Number(rule.amountPerChild)||0);
-    const paid=payments.filter(p=>String(p.date||"").slice(0,7)===key).reduce((s,p)=>s+Math.max(0,Number(p.amount)||0),0);
+    const accrualDate=new Date(d.getFullYear(), d.getMonth()+1, 1);
+    const nextAccrualDate=new Date(d.getFullYear(), d.getMonth()+2, 1);
+    // Платежи, поступившие после даты начисления и до следующего начисления,
+    // показываются рядом с соответствующим расчётным месяцем.
+    const paid=payments.filter(p=>{
+      const paymentDate=new Date(`${p.date||""}T00:00:00`);
+      return !Number.isNaN(paymentDate.getTime()) && paymentDate>=accrualDate && paymentDate<nextAccrualDate;
+    }).reduce((s,p)=>s+Math.max(0,Number(p.amount)||0),0);
     carry += accrued-paid;
-    rows.push({key, accrued, paid, balance:carry, rule});
+    rows.push({key, accrualDate:accrualDate.toISOString().slice(0,10), accrued, paid, balance:carry, rule});
   }
   return rows;
 }
@@ -1483,7 +1502,7 @@ function renderAlimony() {
   if(byId("alimonyOverpaymentTotal")) byId("alimonyOverpaymentTotal").textContent=money(over);
   if(byId("alimonyPaymentCount")) byId("alimonyPaymentCount").textContent=payments.length;
   if(byId("alimonyRules")) byId("alimonyRules").innerHTML=rules.length?rules.map(rule=>{const isPm=rule.calculationType==="subsistence"||Number(rule.subsistenceAmount)>0;const decreeUrl=safeExternalUrl(rule.decreeUrl);return `<article class="alimony-rule-card" data-alimony-rule-id="${escapeHtml(rule.id)}" role="button" tabindex="0" aria-label="Открыть и редактировать правило с ${escapeHtml(rule.effectiveFrom)}"><div><strong>${rule.effectiveTo ? `С ${escapeHtml(rule.effectiveFrom)} по ${escapeHtml(rule.effectiveTo)}` : `С ${escapeHtml(rule.effectiveFrom)}`}</strong><small>${rule.childrenCount} детей × ${money(rule.amountPerChild)} в месяц</small>${isPm?`<div class="alimony-pm-details"><span>${escapeHtml(rule.subsistenceRegion||"Москва")}: прожиточный минимум ${money(rule.subsistenceAmount||0)}</span><span>${Number(rule.subsistencePercent||0).toLocaleString("ru-RU")}% = ${money(rule.amountPerChild||0)} на ребёнка</span></div>`:""}<p>${escapeHtml(rule.basis||"Основание не указано")}</p>${rule.decreeNumber?`<p class="alimony-decree">${decreeUrl?`<a href="${escapeHtml(decreeUrl)}" target="_blank" rel="noopener">${escapeHtml(rule.decreeNumber)}</a>`:escapeHtml(rule.decreeNumber)}</p>`:""}<small class="alimony-edit-hint">Нажмите, чтобы просмотреть или изменить правило</small></div><button class="icon-button delete-alimony-rule" data-rule-id="${escapeHtml(rule.id)}" aria-label="Удалить правило">×</button></article>`;}).join(""):`<article class="empty-state"><strong>Нет правил начисления</strong><p>Добавьте размер алиментов и дату начала.</p></article>`;
-  if(byId("alimonyMonthLedger")) byId("alimonyMonthLedger").innerHTML=ledger.length?[...ledger].reverse().slice(0,36).map(m=>`<article class="alimony-month-row"><div><strong>${monthDate(m.key).toLocaleDateString("ru-RU",{month:"long",year:"numeric"})}</strong><small>Начислено ${money(m.accrued)} • Оплачено ${money(m.paid)}</small></div><b class="${m.balance>0?'bad':'good'}">${m.balance>0?`Долг ${money(m.balance)}`:`Переплата ${money(Math.abs(m.balance))}`}</b></article>`).join(""):`<article class="empty-state"><strong>Расчёт пока пуст</strong><p>Добавьте правило начисления.</p></article>`;
+  if(byId("alimonyMonthLedger")) byId("alimonyMonthLedger").innerHTML=ledger.length?[...ledger].reverse().slice(0,36).map(m=>`<article class="alimony-month-row"><div><strong>За ${monthDate(m.key).toLocaleDateString("ru-RU",{month:"long",year:"numeric"})}</strong><small>Начислено ${new Date(`${m.accrualDate}T00:00:00`).toLocaleDateString("ru-RU")} • ${money(m.accrued)} • Оплачено ${money(m.paid)}</small></div><b class="${m.balance>0?'bad':'good'}">${m.balance>0?`Долг ${money(m.balance)}`:`Переплата ${money(Math.abs(m.balance))}`}</b></article>`).join(""):`<article class="empty-state"><strong>Расчёт пока пуст</strong><p>Начисление за месяц появится 1-го числа следующего месяца.</p></article>`;
   if(byId("alimonyRows")) byId("alimonyRows").innerHTML=payments.length?payments.slice(0,100).map(row=>`<tr><td>${escapeHtml(row.date)}</td><td>${escapeHtml(row.payerName||"Не указан")}</td><td>${escapeHtml(row.description||"Алименты")}</td><td>${accountPill(row.account)}</td><td>${escapeHtml(row.paymentStatus==="confirmed"?"Подтверждён":row.paymentStatus==="unidentified"?"Неопознанный":"Спорный")}</td><td class="amount good">${money(row.amount)}</td></tr>`).join(""):`<tr><td colspan="6">Поступлений пока нет</td></tr>`;
 }
 
@@ -3105,7 +3124,14 @@ byId("exportWorkReportBtn")?.addEventListener("click",()=>{const rows=filteredWo
 
 
 
-const MOSCOW_PM_SEARCH_URL = "https://www.garant.ru/search/?q=%D0%B2%D0%B5%D0%BB%D0%B8%D1%87%D0%B8%D0%BD%D0%B0%20%D0%BF%D1%80%D0%BE%D0%B6%D0%B8%D1%82%D0%BE%D1%87%D0%BD%D0%BE%D0%B3%D0%BE%20%D0%BC%D0%B8%D0%BD%D0%B8%D0%BC%D1%83%D0%BC%D0%B0%20%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0%20%D0%B4%D0%BB%D1%8F%20%D0%B4%D0%B5%D1%82%D0%B5%D0%B9";
+const MOSCOW_PM_2026_URL = "https://www.garant.ru/hotlaw/moscow/1908878/";
+function moscowPmManualSearchUrl(periodKey=currentAlimonyPeriodKey()) {
+  const phrase=`прожиточный минимум для детей Москва ${alimonyPmPeriodLabel(periodKey)} постановление Правительства Москвы`;
+  return `https://yandex.ru/search/?text=${encodeURIComponent(phrase)}`;
+}
+function moscowPmLookupUrl(periodKey=currentAlimonyPeriodKey()) {
+  return Number(String(periodKey).slice(0,4))===2026 ? MOSCOW_PM_2026_URL : moscowPmManualSearchUrl(periodKey);
+}
 let moscowPmRequestInProgress = false;
 let moscowPmRequestTimeout = null;
 
@@ -3164,8 +3190,10 @@ function applyOfficialMoscowPm(data, { save = true } = {}) {
   if (data.decreeUrl) form.elements.decreeUrl.value = data.decreeUrl;
   const link = byId("moscowPmSourceLink");
   if (link) {
-    link.hidden = !data.decreeUrl;
-    if (data.decreeUrl) link.href = data.decreeUrl;
+    const sourceUrl=safeExternalUrl(data.decreeUrl) || moscowPmManualSearchUrl(data.periodKey || currentAlimonyPeriodKey());
+    link.hidden = false;
+    link.href = sourceUrl;
+    link.textContent = data.decreeUrl ? "Открыть источник" : "Найти постановление в браузере";
   }
   setMoscowPmStatus(`Загружено: ${money(Number(data.amount))} на ребёнка за ${data.periodLabel || alimonyPmPeriodLabel(data.periodKey || `${data.year}-01`)}. Источник: ${data.source || "правовая публикация"}.`, "success");
   if (save) {
@@ -3212,7 +3240,7 @@ function requestMoscowChildMinimum({ force = false } = {}) {
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
-  fetch(MOSCOW_PM_SEARCH_URL, { headers: { "Accept": "text/html" }, signal: controller.signal })
+  fetch(moscowPmLookupUrl(periodKey), { headers: { "Accept": "text/html" }, signal: controller.signal })
     .then((response) => {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return response.text();
@@ -3224,7 +3252,7 @@ function requestMoscowChildMinimum({ force = false } = {}) {
       const year = Number(periodKey.slice(0,4));
       window.onMoscowChildMinimumLoaded(JSON.stringify({
         region: "Москва", year, periodKey, cacheKey: alimonyPmCacheKey(periodKey), periodLabel: alimonyPmPeriodLabel(periodKey),
-        amount: Number(amountMatch[1].replace(/\s/g,"")), decreeNumber: "", decreeUrl: MOSCOW_PM_SEARCH_URL,
+        amount: Number(amountMatch[1].replace(/\s/g,"")), decreeNumber: "", decreeUrl: moscowPmLookupUrl(periodKey),
         fetchedAt: new Date().toISOString(), source: "ГАРАНТ"
       }));
     })
@@ -3256,7 +3284,9 @@ window.onMoscowChildMinimumError = function(message) {
     applyOfficialMoscowPm(cached, { save: false });
     setMoscowPmStatus(`Не удалось проверить обновление. Используется последнее официальное значение ${money(Number(cached.amount))}.`, "warning");
   } else {
-    setMoscowPmStatus(`Не удалось загрузить данные автоматически: ${message}. Проверьте интернет и нажмите «Обновить».`, "error");
+    setMoscowPmStatus(`Не удалось загрузить данные автоматически: ${message}. Можно открыть поиск постановления в браузере или ввести сумму вручную.`, "error");
+    const link=byId("moscowPmSourceLink");
+    if(link){link.hidden=false;link.href=moscowPmManualSearchUrl(periodKey);link.textContent="Найти постановление в браузере";}
   }
 };
 
@@ -4087,3 +4117,47 @@ window.addEventListener("beforeunload", saveState);
 
 byId("refreshMoscowPmBtn")?.addEventListener("click", () => requestMoscowChildMinimum({ force: true }));
 byId("alimonyRuleForm")?.elements?.effectiveFrom?.addEventListener("change", () => requestMoscowChildMinimum());
+
+
+// ===== Package 2: regular money, payment calendar and actual loan balance =====
+let editingRegularPaymentId = null;
+const regularTypeLabels = {utilities:"Коммунальные",education:"Кружки и школа",subscription:"Подписка",tax:"Налог",insurance:"Страховка",loan:"Кредит",other:"Прочее"};
+function dateLocal(d){ const x=new Date(d.getTime()-d.getTimezoneOffset()*60000); return x.toISOString().slice(0,10); }
+function addFrequency(dateText, frequency, step=1){ const d=new Date(`${dateText}T00:00:00`); if(frequency==='weekly') d.setDate(d.getDate()+7*step); else {const m={monthly:1,quarterly:3,halfyear:6,yearly:12}[frequency]||0; d.setMonth(d.getMonth()+m*step);} return dateLocal(d); }
+function regularOccurrences(monthsBack=3, monthsForward=15){
+ const now=new Date(); const from=new Date(now.getFullYear(),now.getMonth()-monthsBack,1); const to=new Date(now.getFullYear(),now.getMonth()+monthsForward+1,0); const out=[];
+ state.regularPayments.filter(x=>x.autoPlan!==false).forEach(t=>{ let date=t.startDate; let guard=0; while(date && guard++<800){const d=new Date(`${date}T00:00:00`); if(t.endDate && date>t.endDate) break; if(d>to) break; if(d>=from){const id=`${t.id}@${date}`; const saved=state.plannedPaymentStates[id]||{}; out.push({...t, occurrenceId:id, dueDate:date, ...saved});} if(t.frequency==='once') break; date=addFrequency(date,t.frequency,1); }});
+ // Insurance annual obligations
+ state.insurancePolicies.forEach(pol=>{ if(!pol.endDate) return; const id=`insurance@${pol.id}@${pol.endDate}`; const saved=state.plannedPaymentStates[id]||{}; const d=new Date(`${pol.endDate}T00:00:00`); if(d>=from&&d<=to) out.push({id:pol.id,occurrenceId:id,name:`Продление: ${pol.subjectName}`,paymentType:'insurance',amount:Number(pol.cost)||0,dueDate:pol.endDate,category:'Страхование',project:pol.project||'',...saved,systemGenerated:true}); });
+ // Loan schedule obligations
+ plannedLoanPaymentsList(24).forEach(item=>{const id=`loan@${item.id}`; const saved=state.plannedPaymentStates[id]||{}; out.push({...item,occurrenceId:id,dueDate:item.date,paymentType:'loan',amount:item.amount,...saved,systemGenerated:true});});
+ return out.sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
+}
+function occurrenceStatus(o){ if(o.paidDate||o.transactionId) return 'paid'; const today=dateLocal(new Date()); if(o.dueDate<today) return 'overdue'; const diff=(new Date(o.dueDate)-new Date(today))/86400000; return diff<=Math.max(0,Number(o.remindDays??3))?'due':'planned'; }
+function populateRegularFilters(){
+ const sel=byId('regularMonthFilter'); if(!sel) return; const current=sel.value; const now=new Date(); let opts=''; for(let i=-3;i<=12;i++){const d=new Date(now.getFullYear(),now.getMonth()+i,1); const v=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; opts+=`<option value="${v}">${d.toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</option>`;} sel.innerHTML=opts; sel.value=current&&[...sel.options].some(o=>o.value===current)?current:`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+}
+function renderRegularMoney(){
+ if(!byId('regularCalendar')) return; populateRegularFilters(); const month=byId('regularMonthFilter').value; const type=byId('regularTypeFilter').value; const status=byId('regularStatusFilter').value; const all=regularOccurrences(); const rows=all.filter(o=>o.dueDate.startsWith(month)&&(type==='all'||o.paymentType===type)&&(status==='all'||occurrenceStatus(o)===status));
+ byId('regularCalendar').innerHTML=rows.length?rows.map(o=>{const s=occurrenceStatus(o); return `<article class="regular-payment-row status-${s}" data-occurrence-id="${escapeHtml(o.occurrenceId)}"><div class="regular-date"><strong>${new Date(o.dueDate+'T00:00:00').getDate()}</strong><span>${new Date(o.dueDate+'T00:00:00').toLocaleDateString('ru-RU',{month:'short'})}</span></div><div class="regular-main"><span class="regular-type">${escapeHtml(regularTypeLabels[o.paymentType]||'Платёж')}</span><strong>${escapeHtml(o.name)}</strong><small>${escapeHtml(o.project||o.payee||o.category||'')} ${o.transactionId?'• связано с операцией':''}</small></div><div class="regular-amount"><strong>${money(o.paidAmount||o.amount)}</strong><span>${s==='paid'?'Оплачено':s==='overdue'?'Просрочено':s==='due'?'Скоро':'В плане'}</span></div><button class="icon-button open-planned-payment" data-occurrence-id="${escapeHtml(o.occurrenceId)}" title="Открыть">›</button></article>`}).join(''):`<article class="empty-state"><strong>Платежей нет</strong><p>Добавьте регулярный платёж или выберите другой месяц.</p></article>`;
+ byId('regularTemplateCards').innerHTML=state.regularPayments.length?state.regularPayments.map(t=>`<article class="regular-template-card"><div><span>${escapeHtml(regularTypeLabels[t.paymentType]||'Платёж')}</span><h3>${escapeHtml(t.name)}</h3><p>${money(t.amount)} • ${t.frequency==='monthly'?'ежемесячно':t.frequency==='weekly'?'еженедельно':t.frequency==='quarterly'?'раз в квартал':t.frequency==='halfyear'?'раз в полгода':t.frequency==='yearly'?'ежегодно':'однократно'}</p></div><div><button class="insurance-action-icon edit-regular-payment" data-template-id="${escapeHtml(t.id)}" title="Редактировать">✏️</button><button class="insurance-action-icon delete-regular-payment" data-template-id="${escapeHtml(t.id)}" title="Удалить">🗑️</button></div></article>`).join(''):`<article class="empty-state"><strong>Шаблонов нет</strong><p>Добавьте коммунальные платежи, кружки, подписки, налоги или другие обязательства.</p></article>`;
+ const today=new Date(), todayText=dateLocal(today), next30=dateLocal(new Date(today.getFullYear(),today.getMonth(),today.getDate()+30)); const upcoming=all.filter(o=>!['paid'].includes(occurrenceStatus(o))&&o.dueDate>=todayText&&o.dueDate<=next30); const overdue=all.filter(o=>occurrenceStatus(o)==='overdue'); const paid=all.filter(o=>occurrenceStatus(o)==='paid'&&String(o.paidDate||o.dueDate).startsWith(`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`));
+ byId('regularNext30Total').textContent=money(upcoming.reduce((s,o)=>s+Number(o.amount||0),0)); byId('regularNext30Count').textContent=`${upcoming.length} платежей`; byId('regularOverdueTotal').textContent=money(overdue.reduce((s,o)=>s+Number(o.amount||0),0)); byId('regularOverdueCount').textContent=`${overdue.length} платежей`; byId('regularPaidTotal').textContent=money(paid.reduce((s,o)=>s+Number(o.paidAmount||o.amount||0),0)); byId('regularPaidCount').textContent=`${paid.length} платежей`;
+}
+function fillRegularDialog(t=null){ const f=byId('regularPaymentForm'); f.reset(); editingRegularPaymentId=t?.id||null; byId('regularPaymentDialogTitle').textContent=t?'Редактировать платёж':'Регулярный платёж'; const cats=categoryNamesByType('expense'); byId('regularCategorySelect').innerHTML=(cats.length?cats:['Обязательные платежи']).map(x=>`<option>${escapeHtml(x)}</option>`).join(''); byId('regularAccountSelect').innerHTML='<option value="">Не указан</option>'+state.accounts.map(a=>`<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`).join(''); const e=f.elements; e.startDate.value=t?.startDate||dateLocal(new Date()); e.remindDays.value=t?.remindDays??3; e.autoPlan.checked=t?.autoPlan!==false; if(t) Object.entries(t).forEach(([k,v])=>{if(e[k]&&k!=='autoPlan') e[k].value=v??'';}); byId('regularPaymentDialog').showModal(); }
+function candidateTransactions(o){return state.rows.filter(r=>Number(r.amount)<0&&Math.abs(Math.abs(Number(r.amount))-Number(o.amount||0))<=Math.max(5,Number(o.amount||0)*.03)&&Math.abs((new Date(r.date)-new Date(o.dueDate))/86400000)<=10).sort((a,b)=>Math.abs(new Date(a.date)-new Date(o.dueDate))-Math.abs(new Date(b.date)-new Date(o.dueDate))).slice(0,30);}
+function openPlannedPayment(id){const o=regularOccurrences().find(x=>x.occurrenceId===id); if(!o)return; const f=byId('plannedPaymentForm'), s=state.plannedPaymentStates[id]||{}; f.elements.occurrenceId.value=id; f.elements.paidDate.value=s.paidDate||dateLocal(new Date()); f.elements.paidAmount.value=s.paidAmount||o.amount||''; f.elements.comment.value=s.comment||''; byId('plannedPaymentSubtitle').textContent=`${o.name} • срок ${formatTransactionDate(o.dueDate)} • ${money(o.amount)}`; const candidates=candidateTransactions(o); byId('plannedTransactionSelect').innerHTML='<option value="">Не связывать</option>'+candidates.map(r=>`<option value="${escapeHtml(r.id)}">${formatTransactionDate(r.date)} • ${escapeHtml(r.description)} • ${money(Math.abs(r.amount))}</option>`).join(''); byId('plannedTransactionSelect').value=s.transactionId||''; byId('plannedPaymentDialog').showModal();}
+function loanActualPayments(product){return Array.isArray(product.actualPayments)?product.actualPayments:[];}
+function loanRemaining(product){const principal=Number(product.principal)||0; return Math.max(0,principal-loanActualPayments(product).reduce((s,p)=>s+Number(p.principalPart||0),0));}
+function addLoanPaymentButton(card, product){return card.replace('</article>',`<div class="loan-actions"><button class="ghost add-loan-payment" data-product-id="${escapeHtml(product.id)}">+ Платёж</button><small>Фактических платежей: ${loanActualPayments(product).length}</small></div></article>`)}
+const _financeProductCardPkg2=financeProductCard;
+financeProductCard=function(product){let h=_financeProductCardPkg2(product); if(product.type==='loan'){h=h.replace(`<div><span>Сумма</span><strong>${money(product.principal)}</strong></div>`,`<div><span>Первоначальная сумма</span><strong>${money(product.principal)}</strong></div><div><span>Остаток долга</span><strong>${money(loanRemaining(product))}</strong></div>`); h=addLoanPaymentButton(h,product);} return h;};
+const _renderFinanceProductsPkg2=renderFinanceProducts;
+renderFinanceProducts=function(){_renderFinanceProductsPkg2(); const loans=state.financialProducts.filter(x=>x.type==='loan'); byId('loanBalanceTotal').textContent=money(loans.reduce((s,x)=>s+loanRemaining(x),0));};
+byId('addRegularPaymentBtn')?.addEventListener('click',()=>fillRegularDialog());
+['regularMonthFilter','regularTypeFilter','regularStatusFilter'].forEach(id=>byId(id)?.addEventListener('change',renderRegularMoney));
+byId('regularPaymentForm')?.addEventListener('submit',e=>{e.preventDefault(); const f=e.currentTarget,d=Object.fromEntries(new FormData(f).entries()); const obj={id:editingRegularPaymentId||`regular-${Date.now()}`,name:d.name,paymentType:d.paymentType,amount:Number(d.amount)||0,frequency:d.frequency,startDate:d.startDate,endDate:d.endDate||'',category:d.category||'',account:d.account||'',project:d.project||'',payee:d.payee||'',remindDays:Number(d.remindDays)||0,autoPlan:d.autoPlan==='true'}; const i=state.regularPayments.findIndex(x=>x.id===obj.id); if(i>=0)state.regularPayments[i]=obj;else state.regularPayments.push(obj); saveState(); byId('regularPaymentDialog').close(); render(); setView('calendar');});
+document.addEventListener('click',e=>{const edit=e.target.closest('.edit-regular-payment'); if(edit){fillRegularDialog(state.regularPayments.find(x=>x.id===edit.dataset.templateId));return;} const del=e.target.closest('.delete-regular-payment'); if(del&&confirm('Удалить шаблон и будущие платежи?')){state.regularPayments=state.regularPayments.filter(x=>x.id!==del.dataset.templateId);saveState();renderRegularMoney();return;} const open=e.target.closest('.open-planned-payment'); if(open){openPlannedPayment(open.dataset.occurrenceId);return;} const lp=e.target.closest('.add-loan-payment'); if(lp){const p=state.financialProducts.find(x=>x.id===lp.dataset.productId); const f=byId('loanPaymentForm');f.reset();f.elements.productId.value=p.id;f.elements.date.value=dateLocal(new Date()); const candidates=state.rows.filter(r=>Number(r.amount)<0).slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,100);byId('loanTransactionSelect').innerHTML='<option value="">Не связывать</option>'+candidates.map(r=>`<option value="${escapeHtml(r.id)}">${formatTransactionDate(r.date)} • ${escapeHtml(r.description)} • ${money(Math.abs(r.amount))}</option>`).join('');byId('loanPaymentDialog').showModal();}});
+byId('plannedPaymentForm')?.addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());state.plannedPaymentStates[d.occurrenceId]={paidDate:d.paidDate||dateLocal(new Date()),paidAmount:Number(d.paidAmount)||0,transactionId:d.transactionId||'',comment:d.comment||''};saveState();byId('plannedPaymentDialog').close();render();});
+byId('markPlannedUnpaidBtn')?.addEventListener('click',()=>{const id=byId('plannedPaymentForm').elements.occurrenceId.value;delete state.plannedPaymentStates[id];saveState();byId('plannedPaymentDialog').close();render();});
+byId('loanPaymentForm')?.addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());const p=state.financialProducts.find(x=>x.id===d.productId);if(!p)return;const amount=Number(d.amount)||0;let principalPart=Number(d.principalPart)||0;if(!principalPart){const monthlyInterest=loanRemaining(p)*ratePerMonth(p);principalPart=Math.max(0,Math.min(loanRemaining(p),amount-monthlyInterest));if(d.paymentKind==='early')principalPart=Math.min(loanRemaining(p),amount);}p.actualPayments=[...loanActualPayments(p),{id:`loan-payment-${Date.now()}`,date:d.date,amount,paymentKind:d.paymentKind,principalPart,interestPart:Math.max(0,amount-principalPart),transactionId:d.transactionId||'',comment:d.comment||''}];saveState();byId('loanPaymentDialog').close();render();setView('finance-products');});

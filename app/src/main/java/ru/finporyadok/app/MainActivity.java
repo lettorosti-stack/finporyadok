@@ -71,7 +71,20 @@ public class MainActivity extends Activity {
         webView.addJavascriptInterface(new AndroidQrBridge(), "AndroidQrScanner");
         webView.addJavascriptInterface(new AndroidFileBridge(), "AndroidFileBridge");
         webView.addJavascriptInterface(new AndroidOfficialDataBridge(), "AndroidOfficialDataBridge");
-        webView.setWebViewClient(new WebViewClient());
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest request) {
+                Uri uri = request.getUrl();
+                String scheme = uri == null ? "" : uri.getScheme();
+                if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                    } catch (Exception ignored) { }
+                    return true;
+                }
+                return false;
+            }
+        });
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onShowFileChooser(
@@ -155,9 +168,8 @@ public class MainActivity extends Activity {
                     String exactQuery = "величина прожиточного минимума в городе Москве для детей " + periodPhrase + " постановление Правительства Москвы";
                     String encoded = URLEncoder.encode(exactQuery, "UTF-8");
                     java.util.ArrayList<String> searchUrls = new java.util.ArrayList<>();
-                    searchUrls.add("https://www.garant.ru/search/?q=" + encoded);
-                    searchUrls.add("https://www.garant.ru/hotlaw/moscow/?q=" + encoded);
-                    searchUrls.add("https://publication.pravo.gov.ru/Search/Document?searchtext=" + encoded);
+                    searchUrls.add("https://yandex.ru/search/?text=" + URLEncoder.encode("site:garant.ru " + exactQuery, "UTF-8"));
+                    searchUrls.add("https://yandex.ru/search/?text=" + URLEncoder.encode("site:publication.pravo.gov.ru " + exactQuery, "UTF-8"));
 
                     Exception lastError = null;
                     for (String sourceUrl : directUrls) {
