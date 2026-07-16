@@ -68,6 +68,15 @@
 <p id="metricPeriod">—</p>
 </div>
 <div class="finance-picture-actions">
+<div class="finance-period-date-control" aria-label="Даты финансовой картины">
+<label class="hero-period-select">С даты
+<input id="dashboardDateFrom" type="date"/>
+</label>
+<label class="hero-period-select">По дату
+<input id="dashboardDateTo" type="date"/>
+</label>
+<button class="finance-period-current" id="dashboardPeriodCurrent" type="button">Текущий месяц</button>
+</div>
 <label class="hero-period-select">Период
 <select id="dashboardPeriod">
 <option value="week">Неделя</option>
@@ -203,21 +212,21 @@
 <button id="clearFilters">Сбросить</button>
 </div>
 <div class="metric-grid four compact-grid transaction-overview">
-<article class="metric compact-metric">
+<button class="metric compact-metric tx-metric-drill" data-tx-metric="income" type="button">
 <span>Доходы по фильтру</span>
 <strong class="good" id="txMetricIncome">0 ₽</strong>
-<small>по найденным операциям</small>
-</article>
-<article class="metric compact-metric">
+<small>нажмите для перечня</small>
+</button>
+<button class="metric compact-metric tx-metric-drill" data-tx-metric="expense" type="button">
 <span>Расходы по фильтру</span>
 <strong class="bad" id="txMetricExpense">0 ₽</strong>
-<small>по найденным операциям</small>
-</article>
-<article class="metric compact-metric work-metric">
+<small>нажмите для перечня</small>
+</button>
+<button class="metric compact-metric work-metric tx-metric-drill" data-tx-metric="work" type="button">
 <span>К возмещению с работы</span>
 <strong id="txMetricWork">0 ₽</strong>
-<small id="txMetricWorkCount">0 операций</small>
-</article>
+<small id="txMetricWorkCount">0 операций · открыть перечень</small>
+</button>
 <article class="metric compact-metric">
 <span>Результат</span>
 <strong id="txMetricNet">0 ₽</strong>
@@ -458,6 +467,7 @@
 <div class="panel-head"><h2>Где было выгоднее</h2></div>
 <div class="stack" id="shoppingAnalysis"></div>
 </section>
+<section class="panel shopping-catalog-panel"><div class="panel-head"><div><h2>Карточки товаров</h2><p>Периодичность, цена за единицу, магазины и история</p></div></div><div class="product-catalog" id="shoppingCatalog"></div></section>
 </div>
 </section>
 <section class="view" id="alimony">
@@ -509,7 +519,7 @@
 <div class="upload-card receipt-upload-card">
 <strong>Кассовый чек по QR</strong>
 <span>Сканировать камерой или выбрать JPG / PNG / PDF</span>
-<button class="primary receipt-native-scan" id="nativeReceiptScanBtn" type="button">📷 Сканировать QR камерой</button>
+<button class="primary receipt-native-scan" id="nativeReceiptScanBtn" type="button">📷 Сканировать QR камерой</button><button id="scanPaperReceiptBtn" type="button">🧾 Распознать бумажный чек</button><input accept="image/*" id="paperReceiptInput" type="file" hidden>
 <label class="receipt-photo-fallback">
 <span>Выбрать файл с QR</span>
 <input accept="image/*,.pdf,application/pdf" id="receiptQrInput" type="file"/>
@@ -965,7 +975,7 @@
 <label>Периодичность<select name="frequency"><option value="monthly">Каждый месяц</option><option value="quarterly">Раз в квартал</option><option value="halfyear">Раз в полгода</option><option value="yearly">Раз в год</option><option value="weekly">Каждую неделю</option><option value="once">Однократно</option></select></label>
 <label>Дата внесения платежа<input name="startDate" type="date" required/><small>Для ЖКХ — крайняя дата оплаты</small></label>
 <label>Дата окончания<input name="endDate" type="date"/><small>Необязательно</small></label>
-<label class="utility-only-field" hidden>Дата передачи показаний<input name="meterReadingStartDate" type="date"/><small>Первое событие; далее повторяется с той же периодичностью</small></label>
+<label class="utility-only-field utility-meter-toggle" hidden><input name="hasMeters" type="checkbox" value="true"/><span><strong>Есть счётчики</strong><small>Включить события и уведомления о передаче показаний</small></span></label><label class="utility-only-field meter-date-field" hidden>Дата передачи показаний<input name="meterReadingStartDate" type="date"/><small>Первое событие; далее повторяется с той же периодичностью</small></label>
 <label>Категория<select name="category" id="regularCategorySelect"></select></label>
 <label>Счёт по умолчанию<select name="account" id="regularAccountSelect"></select></label>
 <label>Проект<input name="project" placeholder="Дом, гимнастика, школа…"/></label>
@@ -1029,14 +1039,14 @@
 <menu><button data-close="" type="button">Отмена</button><button class="primary">Сохранить</button></menu>
 </form>
 </dialog>
-<dialog id="shoppingDialog">
+<dialog class="finance-product-dialog" id="productDetailsDialog"><header><div><h2 id="productDetailsTitle">Товар</h2><p>История покупок и цен</p></div><button data-close type="button">×</button></header><div id="productDetailsBody"></div></dialog><dialog class="finance-product-dialog" id="paperReceiptDialog"><header><div><h2>Распознавание бумажного чека</h2><p id="paperReceiptStatus">Выберите хорошо освещённое фото чека.</p></div><button data-close type="button">×</button></header></dialog><dialog id="shoppingDialog">
 <form id="shoppingForm" method="dialog">
 <header>
 <h2>Покупка</h2>
 <button data-close="" type="button">×</button>
 </header>
 <label>Товар<input name="name" required=""/></label>
-<label>Количество<input name="qty"/></label>
+<label>Количество<input name="qty" placeholder="Например, 2 л"/></label><div class="form-grid two"><label>Количество для цены за единицу<input name="unitQty" min="0.001" step="0.001" type="number" value="1"/></label><label>Единица<select name="unitName"><option>шт.</option><option>кг</option><option>г</option><option>л</option><option>мл</option><option>уп.</option></select></label></div><label>Единое название карточки<input name="canonicalName" placeholder="Можно объединить похожие названия"/></label><label>Тип записи<select name="recordType"><option value="purchase">Фактическая покупка</option><option value="planned">Добавить в список</option></select></label>
 <label>Магазин<select id="shoppingStoreSelect" name="store"></select></label>
 <label>Цена<input name="price" step="0.01" type="number"/></label>
 <label>Дата<input name="date" type="date"/></label>

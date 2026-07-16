@@ -15,6 +15,7 @@ const state = {
   alimonyRules: Array.isArray(savedState.alimonyRules) ? savedState.alimonyRules : [],
   regularPayments: Array.isArray(savedState.regularPayments) ? savedState.regularPayments : [],
   plannedPaymentStates: savedState.plannedPaymentStates && typeof savedState.plannedPaymentStates === "object" ? savedState.plannedPaymentStates : {},
+  shoppingAliases: savedState.shoppingAliases && typeof savedState.shoppingAliases === "object" ? savedState.shoppingAliases : {},
   officialSubsistenceData: savedState.officialSubsistenceData || null,
   officialSubsistenceByYear: savedState.officialSubsistenceByYear && typeof savedState.officialSubsistenceByYear === "object" ? savedState.officialSubsistenceByYear : {},
   shopping: savedState.shopping.length ? savedState.shopping : [
@@ -60,11 +61,12 @@ function loadState() {
       alimonyRules: Array.isArray(saved?.alimonyRules) ? saved.alimonyRules : [],
       regularPayments: Array.isArray(saved?.regularPayments) ? saved.regularPayments : [],
       plannedPaymentStates: saved?.plannedPaymentStates && typeof saved.plannedPaymentStates === "object" ? saved.plannedPaymentStates : {},
+      shoppingAliases: saved?.shoppingAliases && typeof saved.shoppingAliases === "object" ? saved.shoppingAliases : {},
       officialSubsistenceData: saved?.officialSubsistenceData || null,
       officialSubsistenceByYear: saved?.officialSubsistenceByYear && typeof saved.officialSubsistenceByYear === "object" ? saved.officialSubsistenceByYear : {}
     };
   } catch {}
-  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], financialProducts: [], insurancePolicies: [], alimonyRules: [], regularPayments: [], plannedPaymentStates: {} };
+  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], shoppingAliases: {}, financialProducts: [], insurancePolicies: [], alimonyRules: [], regularPayments: [], plannedPaymentStates: {} };
 }
 
 function saveState() {
@@ -77,6 +79,7 @@ function saveState() {
     categories: state.categories,
     importArchive: state.importArchive,
     shopping: state.shopping,
+    shoppingAliases: state.shoppingAliases,
     financialProducts: state.financialProducts,
     insurancePolicies: state.insurancePolicies,
     alimonyRules: state.alimonyRules,
@@ -455,32 +458,33 @@ function latestAvailableDate() {
   return dates.at(-1) || new Date();
 }
 
+function parseLocalDateInput(value, endOfDay = false) {
+  if (!value) return null;
+  const date = new Date(`${value}T${endOfDay ? "23:59:59.999" : "00:00:00"}`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function periodRangeByValue(value = "month") {
-  const end = latestAvailableDate();
+  const customStart = parseLocalDateInput(byId("dashboardDateFrom")?.value);
+  const customEnd = parseLocalDateInput(byId("dashboardDateTo")?.value, true);
+  if (customStart && customEnd) {
+    const start = customStart <= customEnd ? customStart : customEnd;
+    const end = customStart <= customEnd ? customEnd : new Date(customStart.setHours(23,59,59,999));
+    return { start, end, label: "Выбранный период" };
+  }
+  const end = new Date();
   const start = new Date(end);
   let label = "Месяц";
-  if (value === "week") {
-    start.setDate(end.getDate() - 6);
-    label = "Неделя";
-  } else if (value === "quarter") {
-    start.setMonth(end.getMonth() - 2, 1);
-    label = "Квартал";
-  } else if (value === "half") {
-    start.setMonth(end.getMonth() - 5, 1);
-    label = "Полугодие";
-  } else if (value === "year") {
-    start.setMonth(end.getMonth() - 11, 1);
-    label = "Год";
-  } else if (value === "all") {
-    const min = state.rows.map((row) => rowDate(row)).filter(Boolean).sort((a, b) => a - b)[0];
+  if (value === "week") { start.setDate(end.getDate() - 6); label = "Неделя"; }
+  else if (value === "quarter") { start.setMonth(end.getMonth() - 2, 1); label = "Квартал"; }
+  else if (value === "half") { start.setMonth(end.getMonth() - 5, 1); label = "Полугодие"; }
+  else if (value === "year") { start.setMonth(end.getMonth() - 11, 1); label = "Год"; }
+  else if (value === "all") {
+    const min = state.rows.map((row) => rowDate(row)).filter(Boolean).sort((a,b)=>a-b)[0];
     if (min) start.setTime(min.getTime());
     label = "Всё время";
-  } else {
-    start.setDate(1);
-    label = "Месяц";
-  }
-  start.setHours(0,0,0,0);
-  end.setHours(23,59,59,999);
+  } else { start.setDate(1); label = "Месяц"; }
+  start.setHours(0,0,0,0); end.setHours(23,59,59,999);
   return { start, end, label };
 }
 
@@ -939,7 +943,7 @@ function transactionCardTemplate(row) {
       <div class="transaction-card-meta">
         <span>${escapeHtml(formatTransactionDate(row.date))}</span>
         <span>${escapeHtml(typeLabel)}</span>
-        <span>${escapeHtml(accountText)}</span>
+        <span class="transaction-bank-meta">${kind === "transfer" ? `${bankIcon(row.from || row.account || "Счёт")}<i aria-hidden="true">→</i>${bankIcon(row.to || "Счёт")}` : bankIcon(row.account || "Без счёта")}</span>
       </div>
       <div class="transaction-card-tags transaction-card-tags--text">
         <span class="soft-pill">${escapeHtml(categoryName)}</span>
@@ -1604,42 +1608,60 @@ function renderAlimony() {
 }
 
 
+function productBaseName(value) {
+  return normalizeBrandText(String(value || ""))
+    .replace(/\b\d+(?:[.,]\d+)?\s*(?:кг|г|мл|л|шт|уп|пач|бут|бан)\b/gi, " ")
+    .replace(/\b(?:акция|скидка|товар)\b/gi, " ")
+    .replace(/\s+/g, " ").trim();
+}
+function canonicalProductName(name) {
+  const raw = productBaseName(name);
+  return state.shoppingAliases[raw] || raw;
+}
+function parseQuantity(value, fallback=1) {
+  const text=String(value||"").replace(',', '.'); const m=text.match(/(\d+(?:\.\d+)?)/); const amount=m?Number(m[1]):fallback;
+  const unit=/кг/i.test(text)?'кг':/\bг\b/i.test(text)?'г':/мл/i.test(text)?'мл':/\bл\b/i.test(text)?'л':/уп|пач/i.test(text)?'уп.':'шт.';
+  return {amount:amount>0?amount:fallback,unit};
+}
+function purchaseHistoryItems() { return state.shopping.filter(i=>i.recordType!=='planned' && i.date); }
+function productCatalog() {
+  const groups=new Map();
+  purchaseHistoryItems().forEach(item=>{const key=canonicalProductName(item.canonicalName||item.name); if(!key)return; if(!groups.has(key))groups.set(key,[]); groups.get(key).push(item);});
+  return [...groups.entries()].map(([key,items])=>{
+    items.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+    const dates=items.map(i=>new Date(`${i.date}T00:00:00`)).filter(d=>!Number.isNaN(d)); const gaps=[];
+    for(let i=1;i<dates.length;i++) gaps.push(Math.round((dates[i]-dates[i-1])/86400000));
+    const frequency=gaps.length?Math.max(1,Math.round(gaps.reduce((a,b)=>a+b,0)/gaps.length)):Number(items.at(-1)?.days)||30;
+    const last=items.at(-1); const next=new Date(`${last.date}T00:00:00`); next.setDate(next.getDate()+frequency);
+    const stores={}; items.forEach(i=>{const q=Number(i.unitQty)||parseQuantity(i.qty).amount||1; const up=Number(i.unitPrice)||((Number(i.price)||0)/q); if(!stores[i.store])stores[i.store]=[];stores[i.store].push(up);});
+    const storeStats=Object.entries(stores).map(([store,prices])=>({store,price:prices.reduce((a,b)=>a+b,0)/prices.length})).sort((a,b)=>a.price-b.price);
+    return {key,name:last.canonicalName||last.name,items,last,frequency,nextDate:dateLocal(next),storeStats};
+  }).sort((a,b)=>a.nextDate.localeCompare(b.nextDate));
+}
+function ensurePredictedShoppingList() {
+  const limit=new Date(); limit.setDate(limit.getDate()+7); const limitText=dateLocal(limit); let changed=false;
+  productCatalog().forEach(p=>{if(p.nextDate>limitText)return; const exists=state.shopping.some(i=>i.recordType==='planned'&&canonicalProductName(i.name)===p.key&&i.checked!==true); if(!exists){state.shopping.unshift({id:`shopping-plan-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,recordType:'planned',name:p.name,canonicalName:p.name,qty:p.last.qty||'1 шт.',store:p.storeStats[0]?.store||p.last.store||'',price:Number(p.last.price)||0,date:p.nextDate,autoAdded:true,checked:false});changed=true;}});
+  if(changed) saveState();
+}
 function renderShopping() {
-  byId("shoppingList").innerHTML = state.shopping.map((item) => shoppingRow(item)).join("");
-  byId("purchasePredictions").innerHTML = state.shopping.map((item) => {
-    const days = item.days || 30;
-    return summaryRow(item.name, `${item.qty || "1 шт."} • ${storePill(item.store)}`, `~${money(item.price)} / ${days} дн.`);
-  }).join("");
+  ensurePredictedShoppingList();
+  const planned=state.shopping.filter(i=>i.recordType==='planned');
+  byId("shoppingList").innerHTML = planned.length?planned.map(shoppingRow).join(""):`<article class="empty-state"><strong>Список пуст</strong><p>Товары добавятся автоматически по истории или вручную.</p></article>`;
+  const catalog=productCatalog();
+  byId("purchasePredictions").innerHTML = catalog.length?catalog.slice(0,20).map(p=>`<article class="row shopping-prediction" data-product-key="${escapeHtml(p.key)}"><div><strong>${escapeHtml(p.name)}</strong><small>Покупается примерно раз в ${p.frequency} дн. • следующая дата ${escapeHtml(p.nextDate)}</small></div><b>${p.nextDate<=dateLocal(new Date())?'Пора купить':'Скоро'}</b></article>`).join(""):`<article class="empty-state"><strong>Недостаточно истории</strong><p>Нужно хотя бы две покупки одного товара.</p></article>`;
+  byId("shoppingCatalog").innerHTML=catalog.length?catalog.map(productCatalogCard).join(''):`<article class="empty-state"><strong>Карточек товаров пока нет</strong></article>`;
   renderShoppingAnalysis();
 }
-
 function shoppingRow(item) {
-  const date = item.date ? ` • ${escapeHtml(item.date)}` : "";
-  return `<article class="row shopping-row"><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.qty || "1 шт.")}${date} • ${storePill(item.store)}</small></div><b>${money(item.price)}</b></article>`;
+  const date = item.date ? ` • до ${escapeHtml(item.date)}` : "";
+  return `<article class="row shopping-row ${item.checked?'is-checked':''}" data-shopping-id="${escapeHtml(item.id||'')}"><button class="shopping-check" data-shopping-id="${escapeHtml(item.id||'')}" title="Отметить купленным">${item.checked?'✓':'○'}</button><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.qty || "1 шт.")}${date} • ${storePill(item.store)}${item.autoAdded?' • добавлено автоматически':''}</small></div><b>${money(item.price)}</b></article>`;
 }
-
+function productCatalogCard(p){const lastQty=Number(p.last.unitQty)||parseQuantity(p.last.qty).amount||1; const unit=p.last.unitName||parseQuantity(p.last.qty).unit; const unitPrice=Number(p.last.unitPrice)||Number(p.last.price||0)/lastQty; const stores=p.storeStats.slice(0,3).map(x=>`${escapeHtml(x.store||'Без магазина')}: ${money(x.price)}/${escapeHtml(unit)}`).join(' • '); return `<article class="product-card" data-product-key="${escapeHtml(p.key)}" tabindex="0"><div><strong>${escapeHtml(p.name)}</strong><small>${p.items.length} покупок • последняя ${escapeHtml(p.last.date)} • прогноз ${escapeHtml(p.nextDate)}</small><p>${stores||'Нет данных для сравнения магазинов'}</p></div><div><span>Цена за единицу</span><b>${money(unitPrice)} / ${escapeHtml(unit)}</b></div></article>`;}
 function renderShoppingAnalysis() {
-  const target = byId("shoppingAnalysis");
-  if (!target) return;
-  const now = new Date();
-  const firstThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const firstPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const rows = state.shopping.filter((item) => {
-    if (!item.date) return false;
-    const date = new Date(item.date);
-    return date >= firstPrevMonth && date < firstThisMonth;
-  });
-  const best = new Map();
-  rows.forEach((item) => {
-    const key = normalizeBrandText(item.name);
-    const current = best.get(key);
-    if (!current || Number(item.price) < Number(current.price)) best.set(key, item);
-  });
-  const items = [...best.values()].sort((a, b) => Number(a.price) - Number(b.price)).slice(0, 12);
-  target.innerHTML = items.length
-    ? items.map((item) => summaryRow(item.name, `выгоднее всего: ${storePill(item.store)} • ${item.date}`, money(item.price))).join("")
-    : `<article class="row"><div><strong>Нет истории за прошлый месяц</strong><small>Добавьте покупки с датой и магазином, чтобы увидеть сравнение цен.</small></div><b>-</b></article>`;
+  const target=byId('shoppingAnalysis'); if(!target)return; const catalog=productCatalog();
+  target.innerHTML=catalog.length?catalog.slice(0,12).map(p=>{const best=p.storeStats[0];return `<article class="row"><div><strong>${escapeHtml(p.name)}</strong><small>${best?`выгоднее: ${escapeHtml(best.store||'Без магазина')}`:'магазин не указан'} • история ${p.items.length} покупок</small></div><b>${best?money(best.price):'—'}</b></article>`;}).join(''):`<article class="empty-state"><strong>Нет истории цен</strong></article>`;
 }
+function openProductDetails(key){const p=productCatalog().find(x=>x.key===key);if(!p)return;byId('productDetailsTitle').textContent=p.name;byId('productDetailsBody').innerHTML=`<section class="product-history"><h3>История цены</h3>${[...p.items].reverse().map(i=>{const q=Number(i.unitQty)||parseQuantity(i.qty).amount||1;const u=i.unitName||parseQuantity(i.qty).unit;const up=Number(i.unitPrice)||Number(i.price||0)/q;return `<article><div><strong>${escapeHtml(i.date)}</strong><small>${escapeHtml(i.store||'Магазин не указан')} • ${escapeHtml(i.name)}</small></div><b>${money(i.price)} · ${money(up)}/${escapeHtml(u)}</b></article>`;}).join('')}</section><section><h3>Объединение названий</h3><p>Все варианты названий этой карточки:</p><div class="alias-list">${[...new Set(p.items.map(i=>i.name))].map(n=>`<span>${escapeHtml(n)}</span>`).join('')}</div><button class="primary add-product-to-list" data-product-key="${escapeHtml(p.key)}">Добавить в список покупок</button></section>`;byId('productDetailsDialog').showModal();}
 
 function rowDate(row) {
   const date = new Date(`${row.date}T00:00:00`);
@@ -2945,9 +2967,53 @@ byId("searchInput")?.addEventListener("input", () => {
 ["accountFilter", "categoryFilter", "typeFilter", "workExpenseFilter"].forEach((id) => byId(id)?.addEventListener("input", () => renderTransactions({ reset: true })));
 ["accountFilter", "categoryFilter", "typeFilter", "workExpenseFilter"].forEach((id) => byId(id)?.addEventListener("change", () => renderTransactions({ reset: true })));
 byId("reportPeriod")?.addEventListener("change", renderReports);
-byId("dashboardPeriod")?.addEventListener("change", renderDashboard);
+function setDashboardDateRangeFromPreset(value) {
+  const end = new Date();
+  const start = new Date(end);
+  if (value === "week") start.setDate(end.getDate() - 6);
+  else if (value === "quarter") start.setMonth(end.getMonth() - 2, 1);
+  else if (value === "half") start.setMonth(end.getMonth() - 5, 1);
+  else if (value === "year") start.setMonth(end.getMonth() - 11, 1);
+  else if (value === "all") {
+    const first = state.rows.map(rowDate).filter(Boolean).sort((a,b)=>a-b)[0];
+    if (first) start.setTime(first.getTime());
+  } else start.setDate(1);
+  if (byId("dashboardDateFrom")) byId("dashboardDateFrom").value = dateLocal(start);
+  if (byId("dashboardDateTo")) byId("dashboardDateTo").value = dateLocal(end);
+  localStorage.setItem("finporyadokDashboardDateFrom", byId("dashboardDateFrom")?.value || "");
+  localStorage.setItem("finporyadokDashboardDateTo", byId("dashboardDateTo")?.value || "");
+  renderDashboard();
+}
+function initializeDashboardDateRange() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const savedFrom = localStorage.getItem("finporyadokDashboardDateFrom");
+  const savedTo = localStorage.getItem("finporyadokDashboardDateTo");
+  if (byId("dashboardDateFrom")) byId("dashboardDateFrom").value = savedFrom || dateLocal(start);
+  if (byId("dashboardDateTo")) byId("dashboardDateTo").value = savedTo || dateLocal(now);
+}
+byId("dashboardPeriod")?.addEventListener("change", (event) => setDashboardDateRangeFromPreset(event.target.value));
+["dashboardDateFrom","dashboardDateTo"].forEach(id => byId(id)?.addEventListener("change", () => {
+  localStorage.setItem("finporyadokDashboardDateFrom", byId("dashboardDateFrom")?.value || "");
+  localStorage.setItem("finporyadokDashboardDateTo", byId("dashboardDateTo")?.value || "");
+  renderDashboard();
+}));
+byId("dashboardPeriodCurrent")?.addEventListener("click", () => setDashboardDateRangeFromPreset("month"));
 byId("drillPeriod")?.addEventListener("change", refreshDrilldown);
 byId("drillSort")?.addEventListener("change", refreshDrilldown);
+document.addEventListener("click", (event) => {
+  const metric = event.target.closest("[data-tx-metric]");
+  if (!metric) return;
+  resetTransactionFilters();
+  const kind = metric.dataset.txMetric;
+  if (kind === "income") byId("typeFilter").value = "income";
+  if (kind === "expense") byId("typeFilter").value = "expense";
+  if (kind === "work") { byId("typeFilter").value = "expense"; byId("workExpenseFilter").value = "work"; }
+  setView("transactions");
+  renderTransactions({ reset: true });
+  byId("transactionRows")?.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
 byId("clearFilters").addEventListener("click", () => {
   resetTransactionFilters();
   renderTransactions({ reset: true });
@@ -3626,7 +3692,7 @@ byId("addShoppingBtn")?.addEventListener("click", () => {
 byId("shoppingForm")?.addEventListener("submit", (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.currentTarget).entries());
-  state.shopping.unshift({ id: `shopping-${Date.now()}`, name: data.name.trim(), qty: data.qty || "1 шт.", store: data.store, price: Number(data.price) || 0, date: data.date, days: 30 });
+  const qty=parseQuantity(data.qty||"1 шт."); state.shopping.unshift({ id: `shopping-${Date.now()}`, recordType: data.recordType||"purchase", name: data.name.trim(), canonicalName: data.canonicalName?.trim()||data.name.trim(), qty: data.qty || "1 шт.", unitQty:Number(data.unitQty)||qty.amount, unitName:data.unitName||qty.unit, unitPrice:(Number(data.price)||0)/(Number(data.unitQty)||qty.amount||1), store: data.store, price: Number(data.price) || 0, date: data.date, days: 30, checked:false });
   saveState();
   byId("shoppingDialog").close();
   renderShopping();
@@ -4017,12 +4083,11 @@ function receiptSelectOptions() {
   if (preferredCategory) byId("receiptCategory").value = preferredCategory;
 }
 
-function addReceiptItemRow(name = "", price = "") {
-  const row = document.createElement("div");
-  row.className = "receipt-item";
-  row.innerHTML = `<input class="receipt-item-name" placeholder="Название товара" value="${escapeHtml(name)}"><input class="receipt-item-price" type="number" min="0" step="0.01" placeholder="Цена" value="${escapeHtml(price)}"><button type="button" aria-label="Удалить позицию">×</button>`;
-  row.querySelector("button").addEventListener("click", () => row.remove());
-  byId("receiptItems").append(row);
+function addReceiptItemRow(name = "", price = "", qty = 1, unit = "шт.") {
+  const row = document.createElement("div"); row.className = "receipt-item";
+  const cards=productCatalog().map(p=>`<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('');
+  row.innerHTML = `<input class="receipt-item-name" placeholder="Название товара" value="${escapeHtml(name)}"><input class="receipt-item-qty" type="number" min="0.001" step="0.001" value="${escapeHtml(qty)}" title="Количество"><select class="receipt-item-unit"><option>шт.</option><option>кг</option><option>г</option><option>л</option><option>мл</option><option>уп.</option></select><input class="receipt-item-price" type="number" min="0" step="0.01" placeholder="Цена" value="${escapeHtml(price)}"><select class="receipt-item-card"><option value="">Новая карточка</option>${cards}</select><button type="button" aria-label="Удалить позицию">×</button>`;
+  row.querySelector('.receipt-item-unit').value=unit; row.querySelector("button").addEventListener("click", () => row.remove()); byId("receiptItems").append(row);
 }
 
 function updateReceiptPreview() {
@@ -4220,6 +4285,8 @@ byId("receiptForm")?.addEventListener("submit", (event) => {
       items
     }
   });
+  const savedReceiptRow = state.rows[0];
+  items.forEach((item,index)=>{ const unitQty=Math.max(0.001,Number(item.qty)||1); state.shopping.unshift({id:`receipt-item-${savedReceiptRow.id}-${index}`,recordType:"purchase",name:item.name,canonicalName:item.canonicalName||item.name,qty:`${unitQty} ${item.unit||"шт."}`,unitQty,unitName:item.unit||"шт.",unitPrice:(Number(item.price)||0)/unitQty,price:Number(item.price)||0,store:data.merchant,date:data.date,sourceReceiptRowId:savedReceiptRow.id}); });
   state.importArchive.unshift({
     id: `receipt-import-${Date.now()}`,
     archivedAt: new Date().toISOString(),
@@ -4236,7 +4303,19 @@ byId("receiptForm")?.addEventListener("submit", (event) => {
 });
 
 
+// ===== Package 3: smart shopping and receipt positions =====
+byId('shoppingList')?.addEventListener('click',e=>{const b=e.target.closest('.shopping-check');if(!b)return;const i=state.shopping.find(x=>x.id===b.dataset.shoppingId);if(i){i.checked=!i.checked;saveState();renderShopping();}});
+byId('shoppingCatalog')?.addEventListener('click',e=>{const c=e.target.closest('[data-product-key]');if(c)openProductDetails(c.dataset.productKey);});
+byId('purchasePredictions')?.addEventListener('click',e=>{const c=e.target.closest('[data-product-key]');if(c)openProductDetails(c.dataset.productKey);});
+byId('productDetailsBody')?.addEventListener('click',e=>{const b=e.target.closest('.add-product-to-list');if(!b)return;const p=productCatalog().find(x=>x.key===b.dataset.productKey);if(!p)return;state.shopping.unshift({id:`shopping-plan-${Date.now()}`,recordType:'planned',name:p.name,canonicalName:p.name,qty:p.last.qty||'1 шт.',store:p.storeStats[0]?.store||p.last.store||'',price:Number(p.last.price)||0,date:p.nextDate,checked:false});saveState();byId('productDetailsDialog').close();renderShopping();});
+function parseReceiptTextLines(text){const lines=String(text||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const out=[];for(let i=0;i<lines.length;i++){const line=lines[i].replace(/\s+/g,' ');const m=line.match(/^(.{2,}?)\s+(\d+[.,]\d{2})\s*(?:₽|руб)?$/i);if(m&&!/итого|сумма|налог|скидка|всего/i.test(m[1]))out.push({name:m[1].trim(),price:Number(m[2].replace(',','.'))});}return out.slice(0,80);}
+window.onNativeReceiptTextRecognized=function(text){const items=parseReceiptTextLines(text);if(!items.length){byId('paperReceiptStatus').textContent='Текст распознан, но позиции не найдены. Проверьте фото или добавьте позиции вручную.';return;}byId('receiptItems').innerHTML='';items.forEach(i=>addReceiptItemRow(i.name,i.price));byId('paperReceiptDialog')?.close();byId('receiptStatus').textContent=`Распознано позиций: ${items.length}. Проверьте названия, количество и цену.`;byId('receiptDialog').showModal();};
+window.onNativeReceiptTextError=function(message){byId('paperReceiptStatus').textContent=message||'Не удалось распознать чек.';};
+byId('scanPaperReceiptBtn')?.addEventListener('click',()=>byId('paperReceiptInput')?.click());
+byId('paperReceiptInput')?.addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;byId('paperReceiptStatus').textContent='Распознаю позиции чека…';try{const data=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',').pop());r.onerror=rej;r.readAsDataURL(file);});if(window.AndroidReceiptOcr?.recognizeBase64){window.AndroidReceiptOcr.recognizeBase64(data);}else throw new Error('Распознавание доступно в Android-приложении.');}catch(err){byId('paperReceiptStatus').textContent=err.message||String(err);}});
+
 cleanupImportedPdfAccounts();
+initializeDashboardDateRange();
 render();
 
 byId("nativeReceiptScanBtn")?.addEventListener("click", () => {
@@ -4278,7 +4357,7 @@ function dateLocal(d){ const x=new Date(d.getTime()-d.getTimezoneOffset()*60000)
 function addFrequency(dateText, frequency, step=1){ const d=new Date(`${dateText}T00:00:00`); if(frequency==='weekly') d.setDate(d.getDate()+7*step); else {const m={monthly:1,quarterly:3,halfyear:6,yearly:12}[frequency]||0; d.setMonth(d.getMonth()+m*step);} return dateLocal(d); }
 function regularOccurrences(monthsBack=3, monthsForward=15){
  const now=new Date(); const from=new Date(now.getFullYear(),now.getMonth()-monthsBack,1); const to=new Date(now.getFullYear(),now.getMonth()+monthsForward+1,0); const out=[];
- state.regularPayments.filter(x=>x.autoPlan!==false).forEach(t=>{ let date=t.startDate; let guard=0; while(date && guard++<800){const d=new Date(`${date}T00:00:00`); if(t.endDate && date>t.endDate) break; if(d>to) break; if(d>=from){const id=`${t.id}@${date}`; const saved=state.plannedPaymentStates[id]||{}; out.push({...t, occurrenceId:id, dueDate:date, eventKind:'payment', ...saved});} if(t.frequency==='once') break; date=addFrequency(date,t.frequency,1); } if(t.paymentType==='utilities' && t.meterReadingStartDate){let meterDate=t.meterReadingStartDate;let meterGuard=0;while(meterDate&&meterGuard++<800){const md=new Date(`${meterDate}T00:00:00`);if(t.endDate&&meterDate>t.endDate)break;if(md>to)break;if(md>=from){const meterId=`${t.id}@meter@${meterDate}`;const meterSaved=state.plannedPaymentStates[meterId]||{};out.push({...t,name:`Показания: ${t.name}`,amount:0,occurrenceId:meterId,dueDate:meterDate,eventKind:'meter-reading',...meterSaved});}if(t.frequency==='once')break;meterDate=addFrequency(meterDate,t.frequency,1);}}});
+ state.regularPayments.filter(x=>x.autoPlan!==false).forEach(t=>{ let date=t.startDate; let guard=0; while(date && guard++<800){const d=new Date(`${date}T00:00:00`); if(t.endDate && date>t.endDate) break; if(d>to) break; if(d>=from){const id=`${t.id}@${date}`; const saved=state.plannedPaymentStates[id]||{}; out.push({...t, occurrenceId:id, dueDate:date, eventKind:'payment', ...saved});} if(t.frequency==='once') break; date=addFrequency(date,t.frequency,1); } if(t.paymentType==='utilities' && t.hasMeters && t.meterReadingStartDate){let meterDate=t.meterReadingStartDate;let meterGuard=0;while(meterDate&&meterGuard++<800){const md=new Date(`${meterDate}T00:00:00`);if(t.endDate&&meterDate>t.endDate)break;if(md>to)break;if(md>=from){const meterId=`${t.id}@meter@${meterDate}`;const meterSaved=state.plannedPaymentStates[meterId]||{};out.push({...t,name:`Показания: ${t.name}`,amount:0,occurrenceId:meterId,dueDate:meterDate,eventKind:'meter-reading',...meterSaved});}if(t.frequency==='once')break;meterDate=addFrequency(meterDate,t.frequency,1);}}});
  // Insurance annual obligations
  state.insurancePolicies.forEach(pol=>{ if(!pol.endDate) return; const id=`insurance@${pol.id}@${pol.endDate}`; const saved=state.plannedPaymentStates[id]||{}; const d=new Date(`${pol.endDate}T00:00:00`); if(d>=from&&d<=to) out.push({id:pol.id,occurrenceId:id,name:`Продление: ${pol.subjectName}`,paymentType:'insurance',amount:Number(pol.cost)||0,dueDate:pol.endDate,category:'Страхование',project:pol.project||'',...saved,systemGenerated:true}); });
  // Loan schedule obligations
@@ -4296,7 +4375,7 @@ function renderRegularMoney(){
  const today=new Date(), todayText=dateLocal(today), next30=dateLocal(new Date(today.getFullYear(),today.getMonth(),today.getDate()+30)); const upcoming=all.filter(o=>!['paid'].includes(occurrenceStatus(o))&&o.dueDate>=todayText&&o.dueDate<=next30); const overdue=all.filter(o=>occurrenceStatus(o)==='overdue'); const paid=all.filter(o=>occurrenceStatus(o)==='paid'&&String(o.paidDate||o.dueDate).startsWith(`${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`));
  byId('regularNext30Total').textContent=money(upcoming.reduce((s,o)=>s+Number(o.amount||0),0)); byId('regularNext30Count').textContent=`${upcoming.length} платежей`; byId('regularOverdueTotal').textContent=money(overdue.reduce((s,o)=>s+Number(o.amount||0),0)); byId('regularOverdueCount').textContent=`${overdue.length} платежей`; byId('regularPaidTotal').textContent=money(paid.reduce((s,o)=>s+Number(o.paidAmount||o.amount||0),0)); byId('regularPaidCount').textContent=`${paid.length} платежей`;
 }
-function updateRegularUtilityFields(){const f=byId('regularPaymentForm');const utility=f?.elements?.paymentType?.value==='utilities';document.querySelectorAll('.utility-only-field').forEach(el=>el.hidden=!utility);if(utility&&f.elements.meterReadingStartDate&&!f.elements.meterReadingStartDate.value){const base=f.elements.startDate.value?new Date(`${f.elements.startDate.value}T00:00:00`):new Date();base.setDate(Math.max(1,base.getDate()-5));f.elements.meterReadingStartDate.value=dateLocal(base);}}
+function updateRegularUtilityFields(){const f=byId('regularPaymentForm');const utility=f?.elements?.paymentType?.value==='utilities';document.querySelectorAll('.utility-only-field').forEach(el=>el.hidden=!utility);const hasMeters=utility&&f?.elements?.hasMeters?.checked;document.querySelectorAll('.meter-date-field').forEach(el=>el.hidden=!hasMeters);if(hasMeters&&f.elements.meterReadingStartDate&&!f.elements.meterReadingStartDate.value){const base=f.elements.startDate.value?new Date(`${f.elements.startDate.value}T00:00:00`):new Date();base.setDate(Math.max(1,base.getDate()-5));f.elements.meterReadingStartDate.value=dateLocal(base);}}
 function fillRegularDialog(t=null){ const f=byId('regularPaymentForm'); f.reset(); editingRegularPaymentId=t?.id||null; byId('regularPaymentDialogTitle').textContent=t?'Редактировать платёж':'Регулярный платёж'; const cats=categoryNamesByType('expense'); byId('regularCategorySelect').innerHTML=(cats.length?cats:['Обязательные платежи']).map(x=>`<option>${escapeHtml(x)}</option>`).join(''); byId('regularAccountSelect').innerHTML='<option value="">Не указан</option>'+state.accounts.map(a=>`<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)}</option>`).join(''); const e=f.elements; e.startDate.value=t?.startDate||dateLocal(new Date()); e.remindDays.value=t?.remindDays??3; e.autoPlan.checked=t?.autoPlan!==false; if(t) Object.entries(t).forEach(([k,v])=>{if(e[k]&&k!=='autoPlan') e[k].value=v??'';}); updateRegularUtilityFields(); byId('regularPaymentDialog').showModal(); }
 function candidateTransactions(o){return state.rows.filter(r=>Number(r.amount)<0&&Math.abs(Math.abs(Number(r.amount))-Number(o.amount||0))<=Math.max(5,Number(o.amount||0)*.03)&&Math.abs((new Date(r.date)-new Date(o.dueDate))/86400000)<=10).sort((a,b)=>Math.abs(new Date(a.date)-new Date(o.dueDate))-Math.abs(new Date(b.date)-new Date(o.dueDate))).slice(0,30);}
 function openPlannedPayment(id){const o=regularOccurrences().find(x=>x.occurrenceId===id); if(!o)return; const f=byId('plannedPaymentForm'), s=state.plannedPaymentStates[id]||{}; f.elements.occurrenceId.value=id; f.elements.paidDate.value=s.paidDate||dateLocal(new Date()); f.elements.paidAmount.value=s.paidAmount||o.amount||''; f.elements.paidAmount.closest('label').hidden=o.eventKind==='meter-reading'; f.elements.comment.value=s.comment||''; byId('plannedPaymentSubtitle').textContent=o.eventKind==='meter-reading'?`${o.name} • передать до ${formatTransactionDate(o.dueDate)}`:`${o.name} • срок ${formatTransactionDate(o.dueDate)} • ${money(o.amount)}`; const candidates=candidateTransactions(o); byId('plannedTransactionSelect').innerHTML='<option value="">Не связывать</option>'+candidates.map(r=>`<option value="${escapeHtml(r.id)}">${formatTransactionDate(r.date)} • ${escapeHtml(r.description)} • ${money(Math.abs(r.amount))}</option>`).join(''); byId('plannedTransactionSelect').value=s.transactionId||''; byId('plannedPaymentDialog').showModal();}
@@ -4309,12 +4388,12 @@ const _renderFinanceProductsPkg2=renderFinanceProducts;
 renderFinanceProducts=function(){_renderFinanceProductsPkg2(); const loans=state.financialProducts.filter(x=>x.type==='loan'); byId('loanBalanceTotal').textContent=money(loans.reduce((s,x)=>s+loanRemaining(x),0));};
 
 byId('openReviewCenterBtn')?.addEventListener('click',()=>{renderReviewCenter();byId('reviewCenterDialog')?.showModal();});
-byId('regularPaymentForm')?.elements?.paymentType?.addEventListener('change',updateRegularUtilityFields);
+byId('regularPaymentForm')?.elements?.paymentType?.addEventListener('change',updateRegularUtilityFields);byId('regularPaymentForm')?.elements?.hasMeters?.addEventListener('change',updateRegularUtilityFields);
 document.addEventListener('click',(event)=>{const button=event.target.closest('.open-review-item');if(!button)return;byId('reviewCenterDialog')?.close();if(button.dataset.reviewKind==='operation'){showOperationDetails(button.dataset.reviewId);return;}if(button.dataset.reviewKind==='planned'){openPlannedPayment(button.dataset.reviewId);return;}if(button.dataset.reviewKind==='insurance'){setView('insurance');setTimeout(()=>{const card=[...document.querySelectorAll('.edit-insurance')].find(el=>el.dataset.policyId===button.dataset.reviewId);card?.click();},50);}});
 
 byId('addRegularPaymentBtn')?.addEventListener('click',()=>fillRegularDialog());
 ['regularMonthFilter','regularTypeFilter','regularStatusFilter'].forEach(id=>byId(id)?.addEventListener('change',renderRegularMoney));
-byId('regularPaymentForm')?.addEventListener('submit',e=>{e.preventDefault(); const f=e.currentTarget,d=Object.fromEntries(new FormData(f).entries()); const obj={id:editingRegularPaymentId||`regular-${Date.now()}`,name:d.name,paymentType:d.paymentType,amount:Number(d.amount)||0,frequency:d.frequency,startDate:d.startDate,endDate:d.endDate||'',category:d.category||'',account:d.account||'',project:d.project||'',payee:d.payee||'',meterReadingStartDate:d.meterReadingStartDate||'',remindDays:Number(d.remindDays)||0,autoPlan:d.autoPlan==='true'}; const i=state.regularPayments.findIndex(x=>x.id===obj.id); if(i>=0)state.regularPayments[i]=obj;else state.regularPayments.push(obj); saveState(); byId('regularPaymentDialog').close(); render(); setView('calendar');});
+byId('regularPaymentForm')?.addEventListener('submit',e=>{e.preventDefault(); const f=e.currentTarget,d=Object.fromEntries(new FormData(f).entries()); const obj={id:editingRegularPaymentId||`regular-${Date.now()}`,name:d.name,paymentType:d.paymentType,amount:Number(d.amount)||0,frequency:d.frequency,startDate:d.startDate,endDate:d.endDate||'',category:d.category||'',account:d.account||'',project:d.project||'',payee:d.payee||'',hasMeters:d.hasMeters==='true',meterReadingStartDate:d.hasMeters==='true'?(d.meterReadingStartDate||''):'',remindDays:Number(d.remindDays)||0,autoPlan:d.autoPlan==='true'}; const i=state.regularPayments.findIndex(x=>x.id===obj.id); if(i>=0)state.regularPayments[i]=obj;else state.regularPayments.push(obj); saveState(); byId('regularPaymentDialog').close(); render(); setView('calendar');});
 document.addEventListener('click',e=>{const edit=e.target.closest('.edit-regular-payment'); if(edit){fillRegularDialog(state.regularPayments.find(x=>x.id===edit.dataset.templateId));return;} const del=e.target.closest('.delete-regular-payment'); if(del&&confirm('Удалить шаблон и будущие платежи?')){state.regularPayments=state.regularPayments.filter(x=>x.id!==del.dataset.templateId);saveState();renderRegularMoney();return;} const open=e.target.closest('.open-planned-payment'); if(open){openPlannedPayment(open.dataset.occurrenceId);return;} const fp=e.target.closest('.edit-finance-product'); if(fp){const product=state.financialProducts.find(x=>x.id===fp.dataset.productId);if(product)openFinanceProductDialog(product);return;} const lp=e.target.closest('.add-loan-payment'); if(lp){const p=state.financialProducts.find(x=>x.id===lp.dataset.productId); const f=byId('loanPaymentForm');f.reset();f.elements.productId.value=p.id;f.elements.date.value=dateLocal(new Date()); const candidates=state.rows.filter(r=>Number(r.amount)<0).slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,100);byId('loanTransactionSelect').innerHTML='<option value="">Не связывать</option>'+candidates.map(r=>`<option value="${escapeHtml(r.id)}">${formatTransactionDate(r.date)} • ${escapeHtml(r.description)} • ${money(Math.abs(r.amount))}</option>`).join('');byId('loanPaymentDialog').showModal();}});
 byId('plannedPaymentForm')?.addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());state.plannedPaymentStates[d.occurrenceId]={paidDate:d.paidDate||dateLocal(new Date()),paidAmount:d.paidAmount===''?0:Number(d.paidAmount)||0,transactionId:d.transactionId||'',comment:d.comment||''};saveState();byId('plannedPaymentDialog').close();render();});
 byId('markPlannedUnpaidBtn')?.addEventListener('click',()=>{const id=byId('plannedPaymentForm').elements.occurrenceId.value;delete state.plannedPaymentStates[id];saveState();byId('plannedPaymentDialog').close();render();});
