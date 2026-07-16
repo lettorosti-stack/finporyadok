@@ -5,6 +5,8 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -23,8 +25,11 @@ import org.json.JSONObject;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 1001;
+    private static final int FILE_SAVE_REQUEST = 1002;
     private WebView webView;
     private ValueCallback<Uri[]> filePathCallback;
+    private String pendingFileContent;
+    private String pendingFileName;
     private GmsBarcodeScanner barcodeScanner;
 
     @Override
@@ -52,6 +57,7 @@ public class MainActivity extends Activity {
         barcodeScanner = GmsBarcodeScanning.getClient(this, options);
 
         webView.addJavascriptInterface(new AndroidQrBridge(), "AndroidQrScanner");
+        webView.addJavascriptInterface(new AndroidFileBridge(), "AndroidFileBridge");
         webView.setWebViewClient(new WebViewClient());
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
@@ -107,6 +113,39 @@ public class MainActivity extends Activity {
         }
     }
 
+
+    public final class AndroidFileBridge {
+        @JavascriptInterface
+        public void saveTextFile(String fileName, String mimeType, String content) {
+            runOnUiThread(() -> {
+                try {
+                    pendingFileName = (fileName == null || fileName.trim().isEmpty())
+                            ? "finporyadok-backup.json" : fileName;
+                    pendingFileContent = content == null ? "" : content;
+                    Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType((mimeType == null || mimeType.trim().isEmpty())
+                            ? "application/octet-stream" : mimeType);
+                    intent.putExtra(Intent.EXTRA_TITLE, pendingFileName);
+                    startActivityForResult(intent, FILE_SAVE_REQUEST);
+                } catch (Exception error) {
+                    sendFileSaveError(error.getMessage());
+                }
+            });
+        }
+    }
+
+    private void sendFileSaved(String fileName) {
+        String js = "window.onNativeFileSaved(" + JSONObject.quote(fileName) + ");";
+        webView.post(() -> webView.evaluateJavascript(js, null));
+    }
+
+    private void sendFileSaveError(String message) {
+        String safeMessage = message == null ? "Не удалось сохранить файл." : message;
+        String js = "window.onNativeFileSaveError(" + JSONObject.quote(safeMessage) + ");";
+        webView.post(() -> webView.evaluateJavascript(js, null));
+    }
+
     private void sendQrError(String message) {
         String js = "window.onNativeQrScanError(" + JSONObject.quote(message) + ");";
         webView.post(() -> webView.evaluateJavascript(js, null));
@@ -115,6 +154,24 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == FILE_SAVE_REQUEST) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                Uri uri = data.getData();
+                try (OutputStream output = getContentResolver().openOutputStream(uri)) {
+                    if (output == null) throw new IllegalStateException("Не удалось открыть файл для записи.");
+                    output.write((pendingFileContent == null ? "" : pendingFileContent)
+                            .getBytes(StandardCharsets.UTF_8));
+                    output.flush();
+                    sendFileSaved(pendingFileName == null ? "Файл" : pendingFileName);
+                } catch (Exception error) {
+                    sendFileSaveError(error.getMessage());
+                }
+            }
+            pendingFileContent = null;
+            pendingFileName = null;
+            return;
+        }
+
         if (requestCode != FILE_CHOOSER_REQUEST || filePathCallback == null) {
             return;
         }
