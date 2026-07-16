@@ -474,17 +474,17 @@
 </label>
 <div class="upload-card receipt-upload-card">
 <strong>Кассовый чек по QR</strong>
-<span>Сканировать камерой или выбрать фото чека</span>
+<span>Сканировать камерой или выбрать JPG / PNG / PDF</span>
 <button class="primary receipt-native-scan" id="nativeReceiptScanBtn" type="button">📷 Сканировать QR камерой</button>
 <label class="receipt-photo-fallback">
-<span>Выбрать готовое фото чека</span>
-<input accept="image/*" capture="environment" id="receiptQrInput" type="file"/>
+<span>Выбрать файл с QR</span>
+<input accept="image/*,.pdf,application/pdf" id="receiptQrInput" type="file"/>
 </label>
 </div>
 <label class="upload-card">
 <strong>QR банковской выписки</strong>
-<span>Проверка QR подлинности документа</span>
-<input accept="image/*" id="qrInput" type="file"/>
+<span>Проверка QR из JPG, PNG или PDF</span>
+<input accept="image/*,.pdf,application/pdf" id="qrInput" type="file"/>
 </label>
 </div>
 <textarea id="pasteImport" placeholder="Или вставьте CSV-текст сюда"></textarea>
@@ -524,7 +524,17 @@
 <option value="all">Все проекты</option>
 </select>
 </label>
+<label>Объект страхования
+<select id="insuranceObjectFilter">
+<option value="all">Все объекты</option>
+</select>
+</label>
 </div>
+
+<section class="insurance-cost-history" id="insuranceCostHistory" hidden>
+  <div class="panel-head"><div><h3>Стоимость страхования по годам</h3><p id="insuranceHistorySubtitle">Фактически оплаченные полисы выбранного объекта</p></div><strong id="insuranceHistoryTotal">0 ₽</strong></div>
+  <div class="insurance-year-grid" id="insuranceYearGrid"></div>
+</section>
 
 <div class="insurance-grid" id="insuranceCards"></div>
 </section>
@@ -704,6 +714,7 @@
 <header><div><h2 id="alimonyRuleDialogTitle">Правило начисления алиментов</h2><p id="alimonyRuleDialogSubtitle">Можно добавлять новые правила с даты изменения размера</p></div><button data-close="" type="button">×</button></header>
 <div class="alimony-form-grid">
 <label>Действует с<input name="effectiveFrom" required="" type="month"/></label>
+<label>Действует по<input name="effectiveTo" type="month"/><small>Оставьте пустым, если начисление продолжается</small></label>
 <label>Количество детей<input min="1" name="childrenCount" required="" type="number" value="2"/></label>
 <label>Способ расчёта
 <select id="alimonyCalculationType" name="calculationType">
@@ -714,7 +725,7 @@
 <label class="alimony-subsistence-field">Регион<input name="subsistenceRegion" value="Москва"/></label>
 <label class="alimony-subsistence-field">Прожиточный минимум на ребёнка
 <div class="official-value-field"><input min="0" name="subsistenceAmount" step="0.01" type="number"/><button class="ghost official-refresh-btn" id="refreshMoscowPmBtn" type="button">Обновить</button></div>
-<small class="official-data-status" id="moscowPmStatus">Значение будет загружено с официального портала Москвы.</small>
+<small class="official-data-status" id="moscowPmStatus">Значение будет найдено автоматически за выбранный год в актуальных публикациях ГАРАНТа и государственных правовых порталов.</small>
 </label>
 <label class="alimony-subsistence-field">Процент от прожиточного минимума<input min="0" name="subsistencePercent" step="0.01" type="number" value="100"/></label>
 <label>Ежемесячно на одного ребёнка<input min="0" name="amountPerChild" required="" step="0.01" type="number"/></label>
@@ -796,7 +807,7 @@
     </menu>
   </form>
 </dialog>
-<input accept="image/*" capture="environment" id="txReceiptQrInput" type="file" hidden>
+<input accept="image/*,.pdf,application/pdf" id="txReceiptQrInput" type="file" hidden>
 
 
 

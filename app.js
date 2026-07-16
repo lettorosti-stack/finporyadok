@@ -14,6 +14,7 @@ const state = {
   insurancePolicies: Array.isArray(savedState.insurancePolicies) ? savedState.insurancePolicies : [],
   alimonyRules: Array.isArray(savedState.alimonyRules) ? savedState.alimonyRules : [],
   officialSubsistenceData: savedState.officialSubsistenceData || null,
+  officialSubsistenceByYear: savedState.officialSubsistenceByYear && typeof savedState.officialSubsistenceByYear === "object" ? savedState.officialSubsistenceByYear : {},
   shopping: savedState.shopping.length ? savedState.shopping : [
     { name: "Молоко", qty: "2 л", days: 4, price: 92 },
     { name: "Корм", qty: "3 кг", days: 26, price: 1450 },
@@ -53,7 +54,9 @@ function loadState() {
       shopping: Array.isArray(saved?.shopping) ? saved.shopping : [],
       financialProducts: Array.isArray(saved?.financialProducts) ? saved.financialProducts : [],
       insurancePolicies: Array.isArray(saved?.insurancePolicies) ? saved.insurancePolicies : [],
-      alimonyRules: Array.isArray(saved?.alimonyRules) ? saved.alimonyRules : []
+      alimonyRules: Array.isArray(saved?.alimonyRules) ? saved.alimonyRules : [],
+      officialSubsistenceData: saved?.officialSubsistenceData || null,
+      officialSubsistenceByYear: saved?.officialSubsistenceByYear && typeof saved.officialSubsistenceByYear === "object" ? saved.officialSubsistenceByYear : {}
     };
   } catch {}
   return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], financialProducts: [], insurancePolicies: [], alimonyRules: [] };
@@ -71,7 +74,9 @@ function saveState() {
     shopping: state.shopping,
     financialProducts: state.financialProducts,
     insurancePolicies: state.insurancePolicies,
-    alimonyRules: state.alimonyRules
+    alimonyRules: state.alimonyRules,
+    officialSubsistenceData: state.officialSubsistenceData,
+    officialSubsistenceByYear: state.officialSubsistenceByYear
   }));
   localStorage.setItem(`${storeKey}.lastSavedAt`, savedAt);
   updateDatabaseStatus();
@@ -1255,11 +1260,38 @@ function insuranceCard(policy) {
 function filteredInsurancePolicies() {
   const statusFilter = byId("insuranceStatusFilter")?.value || "all";
   const projectFilter = byId("insuranceProjectFilter")?.value || "all";
+  const objectFilter = byId("insuranceObjectFilter")?.value || "all";
   return state.insurancePolicies.filter((policy) => {
     const status = insuranceStatus(policy).key;
+    const objectKey = `${policy.subjectType || "other"}|${normalizeBrandText(policy.subjectName || "")}`;
     return (statusFilter === "all" || status === statusFilter) &&
-      (projectFilter === "all" || policy.project === projectFilter);
+      (projectFilter === "all" || policy.project === projectFilter) &&
+      (objectFilter === "all" || objectKey === objectFilter);
   });
+}
+
+function renderInsuranceCostHistory() {
+  const panel = byId("insuranceCostHistory");
+  const select = byId("insuranceObjectFilter");
+  if (!panel || !select) return;
+  const key = select.value;
+  if (!key || key === "all") { panel.hidden = true; return; }
+  const items = state.insurancePolicies.filter((policy) => `${policy.subjectType || "other"}|${normalizeBrandText(policy.subjectName || "")}` === key);
+  if (!items.length) { panel.hidden = true; return; }
+  const byYear = new Map();
+  items.forEach((policy) => {
+    const year = String(policy.startDate || policy.endDate || "").slice(0,4) || "Без года";
+    const current = byYear.get(year) || { total:0, count:0, policies:[] };
+    current.total += Number(policy.cost) || 0; current.count += 1; current.policies.push(policy); byYear.set(year,current);
+  });
+  const first = items[0];
+  byId("insuranceHistorySubtitle").textContent = `${first.subjectName} • ${insuranceSubjectLabel(first.subjectType)}`;
+  byId("insuranceHistoryTotal").textContent = money(items.reduce((sum,item)=>sum+(Number(item.cost)||0),0));
+  byId("insuranceYearGrid").innerHTML = [...byYear.entries()].sort((a,b)=>String(b[0]).localeCompare(String(a[0]))).map(([year,data]) => {
+    const avg = data.count ? data.total / data.count : 0;
+    return `<article class="insurance-year-card"><span>${escapeHtml(year)}</span><strong>${money(data.total)}</strong><small>${data.count} ${data.count===1?"полис":"полиса"} • средняя ${money(avg)}</small></article>`;
+  }).join("");
+  panel.hidden = false;
 }
 
 function renderInsurance() {
@@ -1268,6 +1300,8 @@ function renderInsurance() {
   const active = all.filter((item) => insuranceStatus(item).key !== "expired");
   const expiring = all.filter((item) => insuranceStatus(item).key === "expiring");
   const projects = [...new Set(all.map((item) => item.project).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ru"));
+  const objects = [...new Map(all.filter(item=>item.subjectName).map(item=>[`${item.subjectType || "other"}|${normalizeBrandText(item.subjectName)}`, item])).entries()]
+    .sort((a,b)=>String(a[1].subjectName).localeCompare(String(b[1].subjectName),"ru"));
 
   if (byId("insuranceCards")) {
     byId("insuranceCards").innerHTML = policies.length
@@ -1287,6 +1321,13 @@ function renderInsurance() {
       projects.map((project) => `<option value="${escapeHtml(project)}">${escapeHtml(project)}</option>`).join("");
     if ([...projectSelect.options].some((option) => option.value === current)) projectSelect.value = current;
   }
+  const objectSelect = byId("insuranceObjectFilter");
+  if (objectSelect) {
+    const current = objectSelect.value;
+    objectSelect.innerHTML = `<option value="all">Все объекты</option>` + objects.map(([key,item]) => `<option value="${escapeHtml(key)}">${escapeHtml(item.subjectName)} — ${escapeHtml(insuranceSubjectLabel(item.subjectType))}</option>`).join("");
+    if ([...objectSelect.options].some(option=>option.value===current)) objectSelect.value=current;
+  }
+  renderInsuranceCostHistory();
 }
 
 function populateInsuranceFormOptions() {
@@ -1409,7 +1450,7 @@ function addInsuranceExpense(policy) {
 function monthKey(date) { return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}`; }
 function monthDate(key) { return new Date(`${key}-01T00:00:00`); }
 function alimonyRulesSorted() { return [...state.alimonyRules].sort((a,b)=>a.effectiveFrom.localeCompare(b.effectiveFrom)); }
-function alimonyRuleForMonth(key) { return alimonyRulesSorted().filter(r=>r.effectiveFrom<=key).at(-1) || null; }
+function alimonyRuleForMonth(key) { return alimonyRulesSorted().filter(r => r.effectiveFrom <= key && (!r.effectiveTo || key <= r.effectiveTo)).at(-1) || null; }
 function alimonyPaymentRows() {
   return state.rows.filter(row => row.alimonyPayment || (row.amount>0 && /алим/i.test(`${row.project} ${row.category} ${row.description}`))).map(row=>({ ...row, paymentStatus: row.paymentStatus || "confirmed", payerName: row.payerName || (row.alimonyPayment ? "Должник" : row.payee || "Не указан") }));
 }
@@ -1439,7 +1480,7 @@ function renderAlimony() {
   if(byId("alimonyOpeningDebtMeta")) byId("alimonyOpeningDebtMeta").textContent=`начальный долг ${money(opening)}`;
   if(byId("alimonyOverpaymentTotal")) byId("alimonyOverpaymentTotal").textContent=money(over);
   if(byId("alimonyPaymentCount")) byId("alimonyPaymentCount").textContent=payments.length;
-  if(byId("alimonyRules")) byId("alimonyRules").innerHTML=rules.length?rules.map(rule=>{const isPm=rule.calculationType==="subsistence"||Number(rule.subsistenceAmount)>0;const decreeUrl=safeExternalUrl(rule.decreeUrl);return `<article class="alimony-rule-card" data-alimony-rule-id="${escapeHtml(rule.id)}" role="button" tabindex="0" aria-label="Открыть и редактировать правило с ${escapeHtml(rule.effectiveFrom)}"><div><strong>С ${escapeHtml(rule.effectiveFrom)}</strong><small>${rule.childrenCount} детей × ${money(rule.amountPerChild)} в месяц</small>${isPm?`<div class="alimony-pm-details"><span>${escapeHtml(rule.subsistenceRegion||"Москва")}: прожиточный минимум ${money(rule.subsistenceAmount||0)}</span><span>${Number(rule.subsistencePercent||0).toLocaleString("ru-RU")}% = ${money(rule.amountPerChild||0)} на ребёнка</span></div>`:""}<p>${escapeHtml(rule.basis||"Основание не указано")}</p>${rule.decreeNumber?`<p class="alimony-decree">${decreeUrl?`<a href="${escapeHtml(decreeUrl)}" target="_blank" rel="noopener">${escapeHtml(rule.decreeNumber)}</a>`:escapeHtml(rule.decreeNumber)}</p>`:""}<small class="alimony-edit-hint">Нажмите, чтобы просмотреть или изменить правило</small></div><button class="icon-button delete-alimony-rule" data-rule-id="${escapeHtml(rule.id)}" aria-label="Удалить правило">×</button></article>`;}).join(""):`<article class="empty-state"><strong>Нет правил начисления</strong><p>Добавьте размер алиментов и дату начала.</p></article>`;
+  if(byId("alimonyRules")) byId("alimonyRules").innerHTML=rules.length?rules.map(rule=>{const isPm=rule.calculationType==="subsistence"||Number(rule.subsistenceAmount)>0;const decreeUrl=safeExternalUrl(rule.decreeUrl);return `<article class="alimony-rule-card" data-alimony-rule-id="${escapeHtml(rule.id)}" role="button" tabindex="0" aria-label="Открыть и редактировать правило с ${escapeHtml(rule.effectiveFrom)}"><div><strong>${rule.effectiveTo ? `С ${escapeHtml(rule.effectiveFrom)} по ${escapeHtml(rule.effectiveTo)}` : `С ${escapeHtml(rule.effectiveFrom)}`}</strong><small>${rule.childrenCount} детей × ${money(rule.amountPerChild)} в месяц</small>${isPm?`<div class="alimony-pm-details"><span>${escapeHtml(rule.subsistenceRegion||"Москва")}: прожиточный минимум ${money(rule.subsistenceAmount||0)}</span><span>${Number(rule.subsistencePercent||0).toLocaleString("ru-RU")}% = ${money(rule.amountPerChild||0)} на ребёнка</span></div>`:""}<p>${escapeHtml(rule.basis||"Основание не указано")}</p>${rule.decreeNumber?`<p class="alimony-decree">${decreeUrl?`<a href="${escapeHtml(decreeUrl)}" target="_blank" rel="noopener">${escapeHtml(rule.decreeNumber)}</a>`:escapeHtml(rule.decreeNumber)}</p>`:""}<small class="alimony-edit-hint">Нажмите, чтобы просмотреть или изменить правило</small></div><button class="icon-button delete-alimony-rule" data-rule-id="${escapeHtml(rule.id)}" aria-label="Удалить правило">×</button></article>`;}).join(""):`<article class="empty-state"><strong>Нет правил начисления</strong><p>Добавьте размер алиментов и дату начала.</p></article>`;
   if(byId("alimonyMonthLedger")) byId("alimonyMonthLedger").innerHTML=ledger.length?[...ledger].reverse().slice(0,36).map(m=>`<article class="alimony-month-row"><div><strong>${monthDate(m.key).toLocaleDateString("ru-RU",{month:"long",year:"numeric"})}</strong><small>Начислено ${money(m.accrued)} • Оплачено ${money(m.paid)}</small></div><b class="${m.balance>0?'bad':'good'}">${m.balance>0?`Долг ${money(m.balance)}`:`Переплата ${money(Math.abs(m.balance))}`}</b></article>`).join(""):`<article class="empty-state"><strong>Расчёт пока пуст</strong><p>Добавьте правило начисления.</p></article>`;
   if(byId("alimonyRows")) byId("alimonyRows").innerHTML=payments.length?payments.slice(0,100).map(row=>`<tr><td>${escapeHtml(row.date)}</td><td>${escapeHtml(row.payerName||"Не указан")}</td><td>${escapeHtml(row.description||"Алименты")}</td><td>${accountPill(row.account)}</td><td>${escapeHtml(row.paymentStatus==="confirmed"?"Подтверждён":row.paymentStatus==="unidentified"?"Неопознанный":"Спорный")}</td><td class="amount good">${money(row.amount)}</td></tr>`).join(""):`<tr><td colspan="6">Поступлений пока нет</td></tr>`;
 }
@@ -2866,6 +2907,7 @@ byId("insurancePdfInput")?.addEventListener("change", (event) => {
 
 byId("insuranceStatusFilter")?.addEventListener("change", renderInsurance);
 byId("insuranceProjectFilter")?.addEventListener("change", renderInsurance);
+byId("insuranceObjectFilter")?.addEventListener("change", renderInsurance);
 
 byId("insuranceForm")?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -3061,17 +3103,25 @@ byId("exportWorkReportBtn")?.addEventListener("click",()=>{const rows=filteredWo
 
 
 
-const MOSCOW_PM_SEARCH_URL = "https://publication.pravo.gov.ru/Search/Document?searchtext=%D0%B2%D0%B5%D0%BB%D0%B8%D1%87%D0%B8%D0%BD%D0%B0%20%D0%BF%D1%80%D0%BE%D0%B6%D0%B8%D1%82%D0%BE%D1%87%D0%BD%D0%BE%D0%B3%D0%BE%20%D0%BC%D0%B8%D0%BD%D0%B8%D0%BC%D1%83%D0%BC%D0%B0%20%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0%20%D0%B4%D0%BB%D1%8F%20%D0%B4%D0%B5%D1%82%D0%B5%D0%B9";
+const MOSCOW_PM_SEARCH_URL = "https://www.garant.ru/search/?q=%D0%B2%D0%B5%D0%BB%D0%B8%D1%87%D0%B8%D0%BD%D0%B0%20%D0%BF%D1%80%D0%BE%D0%B6%D0%B8%D1%82%D0%BE%D1%87%D0%BD%D0%BE%D0%B3%D0%BE%20%D0%BC%D0%B8%D0%BD%D0%B8%D0%BC%D1%83%D0%BC%D0%B0%20%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0%20%D0%B4%D0%BB%D1%8F%20%D0%B4%D0%B5%D1%82%D0%B5%D0%B9";
 let moscowPmRequestInProgress = false;
 
-function currentAlimonyYear() {
+function currentAlimonyPeriodKey() {
   const raw = byId("alimonyRuleForm")?.elements?.effectiveFrom?.value || "";
-  const year = Number(raw.slice(0,4));
-  return year || new Date().getFullYear();
+  return /^\d{4}-\d{2}$/.test(raw) ? raw : new Date().toISOString().slice(0,7);
+}
+function currentAlimonyYear() { return Number(currentAlimonyPeriodKey().slice(0,4)); }
+function alimonyPmPeriodLabel(key) {
+  const [year,monthRaw] = String(key).split("-"); const month=Number(monthRaw)||1;
+  if (Number(year) >= 2021) return `${year} год`;
+  if (Number(year) >= 2013) return `${month <= 6 ? "I" : "II"} полугодие ${year} года`;
+  return `${Math.ceil(month/3)} квартал ${year} года`;
 }
 
-function officialPmIsFresh(data, year) {
-  if (!data || Number(data.year) !== Number(year) || !Number(data.amount)) return false;
+function officialPmIsFresh(data, periodKey) {
+  if (!data || !Number(data.amount)) return false;
+  if (data.periodKey && data.periodKey !== periodKey) return false;
+  if (!data.periodKey && Number(data.year) !== Number(periodKey.slice(0,4))) return false;
   const fetched = new Date(data.fetchedAt || 0).getTime();
   return fetched && Date.now() - fetched < 30 * 86400000;
 }
@@ -3096,9 +3146,13 @@ function applyOfficialMoscowPm(data, { save = true } = {}) {
     link.hidden = !data.decreeUrl;
     if (data.decreeUrl) link.href = data.decreeUrl;
   }
-  setMoscowPmStatus(`Загружено с Официального интернет-портала правовой информации: ${money(Number(data.amount))} на ребёнка, ${data.year} год.`, "success");
+  setMoscowPmStatus(`Загружено: ${money(Number(data.amount))} на ребёнка за ${data.periodLabel || alimonyPmPeriodLabel(data.periodKey || `${data.year}-01`)}. Источник: ${data.source || "правовая публикация"}.`, "success");
   if (save) {
-    state.officialSubsistenceData = { ...data, region: data.region || "Москва" };
+    const normalized = { ...data, region: data.region || "Москва" };
+    state.officialSubsistenceData = normalized;
+    const key = normalized.periodKey || `${normalized.year}-01`;
+    state.officialSubsistenceByPeriod = { ...(state.officialSubsistenceByPeriod || {}), [key]: normalized };
+    state.officialSubsistenceByYear = { ...(state.officialSubsistenceByYear || {}), [String(data.year)]: normalized };
     saveState();
   }
   updateAlimonyRuleCalculation();
@@ -3106,20 +3160,21 @@ function applyOfficialMoscowPm(data, { save = true } = {}) {
 }
 
 function requestMoscowChildMinimum({ force = false } = {}) {
-  const year = currentAlimonyYear();
-  const cached = state.officialSubsistenceData;
-  if (!force && officialPmIsFresh(cached, year)) {
+  const periodKey = currentAlimonyPeriodKey();
+  const year = Number(periodKey.slice(0,4));
+  const cached = state.officialSubsistenceByPeriod?.[periodKey] || state.officialSubsistenceByYear?.[String(year)] || (Number(state.officialSubsistenceData?.year) === year ? state.officialSubsistenceData : null);
+  if (!force && officialPmIsFresh(cached, periodKey)) {
     applyOfficialMoscowPm(cached, { save: false });
     return;
   }
   if (moscowPmRequestInProgress) return;
   moscowPmRequestInProgress = true;
-  setMoscowPmStatus(`Загружаю официальный прожиточный минимум Москвы за ${year} год…`);
+  setMoscowPmStatus(`Ищу прожиточный минимум Москвы за ${alimonyPmPeriodLabel(periodKey)}…`);
   const button = byId("refreshMoscowPmBtn");
   if (button) button.disabled = true;
 
   if (window.AndroidOfficialDataBridge?.fetchMoscowChildMinimum) {
-    window.AndroidOfficialDataBridge.fetchMoscowChildMinimum(String(year));
+    window.AndroidOfficialDataBridge.fetchMoscowChildMinimum(periodKey);
     return;
   }
 
@@ -3133,8 +3188,8 @@ function requestMoscowChildMinimum({ force = false } = {}) {
       const amountMatch = text.match(/(?:для\s+детей|дети)[^\d]{0,120}(\d{2}[\s\u00a0]?\d{3})\s*(?:руб|₽)/i);
       if (!amountMatch) throw new Error("На официальной странице значение не найдено");
       window.onMoscowChildMinimumLoaded(JSON.stringify({
-        region: "Москва", year, amount: Number(amountMatch[1].replace(/\s/g,"")),
-        decreeNumber: "", decreeUrl: MOSCOW_PM_SEARCH_URL, fetchedAt: new Date().toISOString(), source: "Официальный интернет-портал правовой информации"
+        region: "Москва", year, periodKey, periodLabel: alimonyPmPeriodLabel(periodKey), amount: Number(amountMatch[1].replace(/\s/g,"")),
+        decreeNumber: "", decreeUrl: MOSCOW_PM_SEARCH_URL, fetchedAt: new Date().toISOString(), source: "ГАРАНТ / правовой портал"
       }));
     })
     .catch((error) => window.onMoscowChildMinimumError(error.message || String(error)));
@@ -3156,7 +3211,9 @@ window.onMoscowChildMinimumError = function(message) {
   moscowPmRequestInProgress = false;
   const button = byId("refreshMoscowPmBtn");
   if (button) button.disabled = false;
-  const cached = state.officialSubsistenceData;
+  const periodKey = currentAlimonyPeriodKey();
+  const year = Number(periodKey.slice(0,4));
+  const cached = state.officialSubsistenceByPeriod?.[periodKey] || state.officialSubsistenceByYear?.[String(year)] || (Number(state.officialSubsistenceData?.year) === year ? state.officialSubsistenceData : null);
   if (cached && Number(cached.amount)) {
     applyOfficialMoscowPm(cached, { save: false });
     setMoscowPmStatus(`Не удалось проверить обновление. Используется последнее официальное значение ${money(Number(cached.amount))}.`, "warning");
@@ -3208,6 +3265,7 @@ function fillAlimonyRuleForm(rule = null) {
   if (submit) submit.textContent = rule ? "Сохранить изменения" : "Сохранить правило";
 
   form.elements.effectiveFrom.value = rule?.effectiveFrom || new Date().toISOString().slice(0,7);
+  form.elements.effectiveTo.value = rule?.effectiveTo || "";
   form.elements.childrenCount.value = Number(rule?.childrenCount) || 2;
   form.elements.calculationType.value = rule?.calculationType || (Number(rule?.subsistenceAmount) > 0 ? "subsistence" : "subsistence");
   form.elements.subsistenceRegion.value = rule?.subsistenceRegion || "Москва";
@@ -3224,7 +3282,7 @@ function fillAlimonyRuleForm(rule = null) {
     link.hidden = !url;
     if (url) link.href = url;
   }
-  setMoscowPmStatus(rule ? "Данные правила загружены. Для проверки официального значения нажмите «Обновить»." : "Значение будет загружено с официального портала.");
+  setMoscowPmStatus(rule ? "Данные правила загружены. Для проверки значения за выбранный год нажмите «Обновить»." : "Значение будет найдено автоматически за выбранный год.");
   updateAlimonyRuleCalculation();
 }
 
@@ -3244,8 +3302,11 @@ byId("alimonyRuleForm")?.addEventListener("submit",event=>{
   const subsistenceAmount=Math.max(0,Number(d.subsistenceAmount)||0);
   const subsistencePercent=Math.max(0,Number(d.subsistencePercent)||0);
   const amountPerChild=calculationType==="subsistence"?subsistenceAmount*subsistencePercent/100:Math.max(0,Number(d.amountPerChild)||0);
+  const effectiveTo = (d.effectiveTo || "").trim();
+  if (effectiveTo && effectiveTo < d.effectiveFrom) { alert("Дата окончания не может быть раньше даты начала начисления."); return; }
   const payload={
     effectiveFrom:d.effectiveFrom,
+    effectiveTo,
     childrenCount:Number(d.childrenCount)||1,
     calculationType,
     subsistenceRegion:(d.subsistenceRegion||"").trim(),
@@ -3677,9 +3738,9 @@ byId("qrInput")?.addEventListener("change", async (event) => {
   if (!file) return;
   byId("importResult").textContent = `Проверяю QR подлинности ${file.name}...`;
   try {
-    const text = await parseQrFile(file);
+    const text = await readQrFromSelectedFile(file);
     if (!text) {
-      byId("importResult").textContent = "QR на изображении не найден. Попробуйте более четкий скриншот только с QR-кодом.";
+      byId("importResult").textContent = "QR в файле не найден. Попробуйте более чёткий JPG/PNG или PDF с QR как изображением.";
       return;
     }
     state.importArchive.unshift({
@@ -3859,11 +3920,22 @@ byId("qrPasteForm")?.addEventListener("submit", (event) => {
   }
 });
 
+async function readQrFromSelectedFile(file) {
+  if (!file) return "";
+  const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  if (isPdf) {
+    const embedded = await extractQrTextFromPdfImages(file);
+    if (embedded) return embedded;
+    throw new Error("QR в PDF не найден. Лучше использовать PDF, где QR сохранён как изображение, либо экспортировать нужную страницу в JPG.");
+  }
+  return parseQrFile(file);
+}
+
 async function handleReceiptImage(file) {
   if (!file) return;
   byId("importResult").textContent = `Сканирую кассовый QR из ${file.name}...`;
   try {
-    const raw = await parseQrFile(file);
+    const raw = await readQrFromSelectedFile(file);
     if (!raw) throw new Error("QR-код не найден.");
     const qrLine = raw.split(/\r?\n/).find((line) => /(?:^|[?&])(?:fn|s|t)=/i.test(line)) || raw;
     processReceiptQrText(qrLine);
