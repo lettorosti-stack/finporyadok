@@ -689,7 +689,8 @@
 <label>Проект<input name="workProject" placeholder="Выставка, маркетинг…"/></label>
 <label>Номер авансового отчёта<input name="reportNumber"/></label>
 <label>Дата передачи<input name="submittedDate" type="date"/></label>
-<label>Сумма возмещения<input min="0" name="reimbursedAmount" step="0.01" type="number"/></label>
+<label>К возмещению<input name="requestedAmount" readonly="" step="0.01" type="number"/></label>
+<label>Фактически возмещено<input min="0" name="reimbursedAmount" step="0.01" type="number"/></label>
 <label>Дата возмещения<input name="reimbursedDate" type="date"/></label>
 <label>Комментарий<textarea name="workComment" rows="3"></textarea></label>
 </div>
@@ -704,10 +705,27 @@
 <div class="alimony-form-grid">
 <label>Действует с<input name="effectiveFrom" required="" type="month"/></label>
 <label>Количество детей<input min="1" name="childrenCount" required="" type="number" value="2"/></label>
+<label>Способ расчёта
+<select id="alimonyCalculationType" name="calculationType">
+<option value="subsistence">Процент от прожиточного минимума</option>
+<option value="fixed">Фиксированная сумма</option>
+</select>
+</label>
+<label class="alimony-subsistence-field">Регион<input name="subsistenceRegion" value="Москва"/></label>
+<label class="alimony-subsistence-field">Прожиточный минимум на ребёнка
+<div class="official-value-field"><input min="0" name="subsistenceAmount" step="0.01" type="number"/><button class="ghost official-refresh-btn" id="refreshMoscowPmBtn" type="button">Обновить</button></div>
+<small class="official-data-status" id="moscowPmStatus">Значение будет загружено с официального портала Москвы.</small>
+</label>
+<label class="alimony-subsistence-field">Процент от прожиточного минимума<input min="0" name="subsistencePercent" step="0.01" type="number" value="100"/></label>
 <label>Ежемесячно на одного ребёнка<input min="0" name="amountPerChild" required="" step="0.01" type="number"/></label>
 <label>Начальная задолженность<input min="0" name="openingDebt" step="0.01" type="number" value="0"/></label>
-<label>Основание<textarea name="basis" rows="3" placeholder="Решение суда, дата вступления в силу"></textarea></label>
+<label class="alimony-subsistence-field">Номер постановления о прожиточном минимуме<input name="decreeNumber" placeholder="Например, постановление Правительства Москвы № …"/></label>
+<label class="alimony-subsistence-field">Ссылка на постановление<input name="decreeUrl" placeholder="https://..." type="url"/>
+<a class="official-source-link" hidden id="moscowPmSourceLink" rel="noopener" target="_blank">Открыть официальный источник</a>
+</label>
+<label class="alimony-basis-field">Основание<textarea name="basis" rows="3" placeholder="Решение суда, дата вступления в силу"></textarea></label>
 </div>
+<div class="alimony-rule-preview" id="alimonyRulePreview"></div>
 <menu><button data-close="" type="button">Отмена</button><button class="primary" type="submit">Сохранить правило</button></menu>
 </form>
 </dialog>

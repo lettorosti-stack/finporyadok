@@ -1309,3 +1309,17 @@ dialog menu {
 .alimony-grid{display:grid;grid-template-columns:minmax(280px,.8fr) minmax(0,1.2fr);gap:14px;margin-bottom:14px}.alimony-rule-card,.alimony-month-row{display:flex;justify-content:space-between;gap:12px;padding:13px;border:1px solid var(--line);border-radius:15px;background:#fff}.alimony-rule-card small,.alimony-rule-card p,.alimony-month-row small{display:block;color:var(--muted);margin:4px 0 0}.alimony-month-list{display:grid;gap:9px;max-height:520px;overflow:auto}.alimony-dialog{width:min(94vw,720px)}.button-row{display:flex;gap:8px;flex-wrap:wrap}
 @media(max-width:900px){.metric-grid.four{grid-template-columns:repeat(2,1fr)}.alimony-grid{grid-template-columns:1fr}}
 @media(max-width:600px){.metric-grid.four{grid-template-columns:1fr}.work-form-grid,.alimony-form-grid,.work-calculation{grid-template-columns:1fr}.work-expense-card-head{display:grid}.work-expense-progress{grid-template-columns:1fr}}
+
+
+/* Reimbursement amount and Moscow subsistence-minimum alimony rule */
+.work-expense-dialog input[readonly]{background:#eef7f5;color:#0f5f57;font-weight:800;border-color:#b9e3dc}
+.alimony-rule-preview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}
+.alimony-rule-preview>div{padding:14px;border-radius:15px;background:linear-gradient(135deg,#eff8ff,#ecfdf5);border:1px solid #d8ebe7}
+.alimony-rule-preview span,.alimony-rule-preview small{display:block;color:#64748b;font-size:12px}
+.alimony-rule-preview strong{display:block;margin:5px 0;font-size:20px}
+.alimony-pm-details{display:grid;gap:4px;margin-top:10px;padding:10px 12px;border-radius:12px;background:#eef8f6;color:#0f5f57;font-size:13px}
+.alimony-decree{margin-top:9px!important}
+.alimony-decree a{color:#0f766e;font-weight:700;text-decoration:underline;text-underline-offset:3px}
+@media(max-width:600px){.alimony-rule-preview{grid-template-columns:1fr}}
+
+.official-value-field{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}.official-refresh-btn{min-height:44px;white-space:nowrap}.official-data-status{display:block;margin-top:6px;color:#64748b;line-height:1.35}.official-data-status[data-tone="success"]{color:#166534}.official-data-status[data-tone="warning"]{color:#9a3412}.official-data-status[data-tone="error"]{color:#b91c1c}.official-source-link{display:inline-flex;margin-top:7px;font-size:12px;font-weight:700;color:#0f766e}@media(max-width:520px){.official-value-field{grid-template-columns:1fr}.official-refresh-btn{width:100%}}

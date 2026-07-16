@@ -13,6 +13,7 @@ const state = {
   financialProducts: Array.isArray(savedState.financialProducts) ? savedState.financialProducts : [],
   insurancePolicies: Array.isArray(savedState.insurancePolicies) ? savedState.insurancePolicies : [],
   alimonyRules: Array.isArray(savedState.alimonyRules) ? savedState.alimonyRules : [],
+  officialSubsistenceData: savedState.officialSubsistenceData || null,
   shopping: savedState.shopping.length ? savedState.shopping : [
     { name: "Молоко", qty: "2 л", days: 4, price: 92 },
     { name: "Корм", qty: "3 кг", days: 26, price: 1450 },
@@ -513,16 +514,18 @@ function hasInsuranceRenewal(policy) {
 }
 
 function insuranceReminderPolicies() {
-  const today = latestAvailableDate();
-  today.setHours(0,0,0,0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
   return state.insurancePolicies
-    .filter((policy) => !hasInsuranceRenewal(policy))
+    .filter((policy) => policy.endDate && !hasInsuranceRenewal(policy))
     .map((policy) => {
       const end = new Date(`${policy.endDate}T00:00:00`);
-      const daysLeft = Math.ceil((end - today) / 86400000);
+      if (Number.isNaN(end.getTime())) return null;
+      end.setHours(0, 0, 0, 0);
+      const daysLeft = Math.round((end.getTime() - today.getTime()) / 86400000);
       return { ...policy, daysLeft };
     })
-    .filter((policy) => policy.daysLeft <= 7)
+    .filter((policy) => policy && policy.daysLeft <= 7)
     .sort((a, b) => a.daysLeft - b.daysLeft);
 }
 
@@ -1434,7 +1437,7 @@ function renderAlimony() {
   if(byId("alimonyOpeningDebtMeta")) byId("alimonyOpeningDebtMeta").textContent=`начальный долг ${money(opening)}`;
   if(byId("alimonyOverpaymentTotal")) byId("alimonyOverpaymentTotal").textContent=money(over);
   if(byId("alimonyPaymentCount")) byId("alimonyPaymentCount").textContent=payments.length;
-  if(byId("alimonyRules")) byId("alimonyRules").innerHTML=rules.length?rules.map(rule=>`<article class="alimony-rule-card"><div><strong>С ${escapeHtml(rule.effectiveFrom)}</strong><small>${rule.childrenCount} детей × ${money(rule.amountPerChild)} в месяц</small><p>${escapeHtml(rule.basis||"Основание не указано")}</p></div><button class="icon-button delete-alimony-rule" data-rule-id="${escapeHtml(rule.id)}">×</button></article>`).join(""):`<article class="empty-state"><strong>Нет правил начисления</strong><p>Добавьте размер алиментов и дату начала.</p></article>`;
+  if(byId("alimonyRules")) byId("alimonyRules").innerHTML=rules.length?rules.map(rule=>{const isPm=rule.calculationType==="subsistence"||Number(rule.subsistenceAmount)>0;const decreeUrl=safeExternalUrl(rule.decreeUrl);return `<article class="alimony-rule-card"><div><strong>С ${escapeHtml(rule.effectiveFrom)}</strong><small>${rule.childrenCount} детей × ${money(rule.amountPerChild)} в месяц</small>${isPm?`<div class="alimony-pm-details"><span>${escapeHtml(rule.subsistenceRegion||"Москва")}: прожиточный минимум ${money(rule.subsistenceAmount||0)}</span><span>${Number(rule.subsistencePercent||0).toLocaleString("ru-RU")}% = ${money(rule.amountPerChild||0)} на ребёнка</span></div>`:""}<p>${escapeHtml(rule.basis||"Основание не указано")}</p>${rule.decreeNumber?`<p class="alimony-decree">${decreeUrl?`<a href="${escapeHtml(decreeUrl)}" target="_blank" rel="noopener">${escapeHtml(rule.decreeNumber)}</a>`:escapeHtml(rule.decreeNumber)}</p>`:""}</div><button class="icon-button delete-alimony-rule" data-rule-id="${escapeHtml(rule.id)}">×</button></article>`;}).join(""):`<article class="empty-state"><strong>Нет правил начисления</strong><p>Добавьте размер алиментов и дату начала.</p></article>`;
   if(byId("alimonyMonthLedger")) byId("alimonyMonthLedger").innerHTML=ledger.length?[...ledger].reverse().slice(0,36).map(m=>`<article class="alimony-month-row"><div><strong>${monthDate(m.key).toLocaleDateString("ru-RU",{month:"long",year:"numeric"})}</strong><small>Начислено ${money(m.accrued)} • Оплачено ${money(m.paid)}</small></div><b class="${m.balance>0?'bad':'good'}">${m.balance>0?`Долг ${money(m.balance)}`:`Переплата ${money(Math.abs(m.balance))}`}</b></article>`).join(""):`<article class="empty-state"><strong>Расчёт пока пуст</strong><p>Добавьте правило начисления.</p></article>`;
   if(byId("alimonyRows")) byId("alimonyRows").innerHTML=payments.length?payments.slice(0,100).map(row=>`<tr><td>${escapeHtml(row.date)}</td><td>${escapeHtml(row.payerName||"Не указан")}</td><td>${escapeHtml(row.description||"Алименты")}</td><td>${accountPill(row.account)}</td><td>${escapeHtml(row.paymentStatus==="confirmed"?"Подтверждён":row.paymentStatus==="unidentified"?"Неопознанный":"Спорный")}</td><td class="amount good">${money(row.amount)}</td></tr>`).join(""):`<tr><td colspan="6">Поступлений пока нет</td></tr>`;
 }
@@ -2942,20 +2945,47 @@ document.addEventListener("click", async (event) => {
 
   const openButton = event.target.closest(".open-insurance-pdf");
   if (openButton) {
-    const record = await getInsurancePdf(openButton.dataset.policyId);
-    if (!record?.blob) {
-      alert("PDF-файл не найден на этом устройстве.");
-      return;
+    openButton.disabled = true;
+    const originalText = openButton.textContent;
+    openButton.textContent = "Открываю…";
+    try {
+      const record = await getInsurancePdf(openButton.dataset.policyId);
+      if (!record?.blob) {
+        alert("PDF-файл не найден на этом устройстве. Загрузите его повторно в карточке полиса.");
+        return;
+      }
+
+      if (window.AndroidFileBridge && typeof window.AndroidFileBridge.openPdfBase64 === "function") {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ""));
+          reader.onerror = () => reject(reader.error || new Error("Не удалось прочитать PDF"));
+          reader.readAsDataURL(record.blob);
+        });
+        const base64 = dataUrl.includes(",") ? dataUrl.split(",", 2)[1] : dataUrl;
+        window.AndroidFileBridge.openPdfBase64(base64, record.name || "insurance-policy.pdf");
+        return;
+      }
+
+      const url = URL.createObjectURL(record.blob);
+      const popup = window.open(url, "_blank");
+      if (!popup) {
+        const link = document.createElement("a");
+        link.href = url;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.download = record.name || "insurance-policy.pdf";
+        document.body.append(link);
+        link.click();
+        link.remove();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (error) {
+      alert(`Не удалось открыть PDF: ${error.message || error}`);
+    } finally {
+      openButton.disabled = false;
+      openButton.textContent = originalText;
     }
-    const url = URL.createObjectURL(record.blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.target = "_blank";
-    link.download = record.name || "insurance-policy.pdf";
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
     return;
   }
 
@@ -2992,7 +3022,7 @@ document.addEventListener("click", async (event) => {
 let activeWorkExpenseRowId = null;
 function openWorkExpenseDialog(rowId) {
   const row=state.rows.find(r=>r.id===rowId); if(!row) return; normalizeWorkExpense(row); activeWorkExpenseRowId=rowId;
-  const form=byId("workExpenseForm"); form.elements.rowId.value=row.id; form.elements.workStatus.value=row.workStatus; form.elements.employer.value=row.employer||""; form.elements.workProject.value=row.workProject||row.project||""; form.elements.reportNumber.value=row.reportNumber||""; form.elements.submittedDate.value=row.submittedDate||""; form.elements.reimbursedAmount.value=Number(row.reimbursedAmount)||0; form.elements.reimbursedDate.value=row.reimbursedDate||""; form.elements.workComment.value=row.workComment||"";
+  const form=byId("workExpenseForm"); form.elements.rowId.value=row.id; form.elements.workStatus.value=row.workStatus; form.elements.employer.value=row.employer||""; form.elements.workProject.value=row.workProject||row.project||""; form.elements.reportNumber.value=row.reportNumber||""; form.elements.submittedDate.value=row.submittedDate||""; form.elements.requestedAmount.value=workExpenseOutstanding(row).toFixed(2); form.elements.reimbursedAmount.value=Number(row.reimbursedAmount)||0; form.elements.reimbursedDate.value=row.reimbursedDate||""; form.elements.workComment.value=row.workComment||"";
   byId("workExpenseDialogSubtitle").textContent=`${row.description||"Рабочий расход"} • ${money(workExpenseAmount(row))}`; updateWorkExpenseCalculation(); byId("workExpenseDialog").showModal();
 }
 function updateWorkExpenseCalculation(){ const row=state.rows.find(r=>r.id===activeWorkExpenseRowId); if(!row)return; const reimb=Math.max(0,Number(byId("workExpenseForm").elements.reimbursedAmount.value)||0); const rest=Math.max(0,workExpenseAmount(row)-reimb); byId("workExpenseCalculation").innerHTML=`<div><span>Сумма расхода</span><strong>${money(workExpenseAmount(row))}</strong></div><div><span>Возмещено</span><strong>${money(reimb)}</strong></div><div><span>Осталось</span><strong>${money(rest)}</strong></div>`; }
@@ -3004,9 +3034,145 @@ byId("workClearFilters")?.addEventListener("click",()=>{byId("workStatusFilter")
 byId("openWorkExpensesBtn")?.addEventListener("click",()=>setView("reimbursements"));
 byId("exportWorkReportBtn")?.addEventListener("click",()=>{const rows=filteredWorkExpenses();const cols=[["Дата","Описание","Работодатель","Проект","Статус","Расход","Возмещено","Остаток","Авансовый отчёт"],...rows.map(r=>[r.date,r.description,r.employer||"",r.workProject||r.project||"",workStatusLabels[r.workStatus],workExpenseAmount(r),Number(r.reimbursedAmount)||0,workExpenseOutstanding(r),r.reportNumber||""])];const csv="\ufeff"+cols.map(row=>row.map(v=>`"${String(v??"").replaceAll('"','""')}"`).join(";")).join("\n");downloadTextFile(`work-expenses-${new Date().toISOString().slice(0,10)}.csv`,csv,"text/csv;charset=utf-8");});
 
-byId("addAlimonyRuleBtn")?.addEventListener("click",()=>{const f=byId("alimonyRuleForm");f.reset();f.elements.effectiveFrom.value=new Date().toISOString().slice(0,7);f.elements.childrenCount.value=2;f.elements.openingDebt.value=state.alimonyRules.length?0:"";byId("alimonyRuleDialog").showModal();});
-byId("alimonyRuleForm")?.addEventListener("submit",event=>{event.preventDefault();const d=Object.fromEntries(new FormData(event.currentTarget).entries());state.alimonyRules.push({id:`alimony-rule-${Date.now()}`,effectiveFrom:d.effectiveFrom,childrenCount:Number(d.childrenCount)||1,amountPerChild:Number(d.amountPerChild)||0,openingDebt:Number(d.openingDebt)||0,basis:d.basis.trim()});saveState();byId("alimonyRuleDialog").close();renderAlimony();});
+
+
+const MOSCOW_PM_SEARCH_URL = "https://www.mos.ru/search/?q=%D0%BF%D1%80%D0%BE%D0%B6%D0%B8%D1%82%D0%BE%D1%87%D0%BD%D1%8B%D0%B9%20%D0%BC%D0%B8%D0%BD%D0%B8%D0%BC%D1%83%D0%BC%20%D0%B4%D0%BB%D1%8F%20%D0%B4%D0%B5%D1%82%D0%B5%D0%B9";
+let moscowPmRequestInProgress = false;
+
+function currentAlimonyYear() {
+  const raw = byId("alimonyRuleForm")?.elements?.effectiveFrom?.value || "";
+  const year = Number(raw.slice(0,4));
+  return year || new Date().getFullYear();
+}
+
+function officialPmIsFresh(data, year) {
+  if (!data || Number(data.year) !== Number(year) || !Number(data.amount)) return false;
+  const fetched = new Date(data.fetchedAt || 0).getTime();
+  return fetched && Date.now() - fetched < 30 * 86400000;
+}
+
+function setMoscowPmStatus(message, tone = "info") {
+  const node = byId("moscowPmStatus");
+  if (!node) return;
+  node.textContent = message;
+  node.dataset.tone = tone;
+}
+
+function applyOfficialMoscowPm(data, { save = true } = {}) {
+  if (!data || !Number(data.amount)) return false;
+  const form = byId("alimonyRuleForm");
+  if (!form) return false;
+  form.elements.subsistenceRegion.value = data.region || "Москва";
+  form.elements.subsistenceAmount.value = Number(data.amount);
+  if (data.decreeNumber) form.elements.decreeNumber.value = data.decreeNumber;
+  if (data.decreeUrl) form.elements.decreeUrl.value = data.decreeUrl;
+  const link = byId("moscowPmSourceLink");
+  if (link) {
+    link.hidden = !data.decreeUrl;
+    if (data.decreeUrl) link.href = data.decreeUrl;
+  }
+  setMoscowPmStatus(`Загружено с официального портала: ${money(Number(data.amount))} на ребёнка, ${data.year} год.`, "success");
+  if (save) {
+    state.officialSubsistenceData = { ...data, region: data.region || "Москва" };
+    saveState();
+  }
+  updateAlimonyRuleCalculation();
+  return true;
+}
+
+function requestMoscowChildMinimum({ force = false } = {}) {
+  const year = currentAlimonyYear();
+  const cached = state.officialSubsistenceData;
+  if (!force && officialPmIsFresh(cached, year)) {
+    applyOfficialMoscowPm(cached, { save: false });
+    return;
+  }
+  if (moscowPmRequestInProgress) return;
+  moscowPmRequestInProgress = true;
+  setMoscowPmStatus(`Загружаю официальный прожиточный минимум Москвы за ${year} год…`);
+  const button = byId("refreshMoscowPmBtn");
+  if (button) button.disabled = true;
+
+  if (window.AndroidOfficialDataBridge?.fetchMoscowChildMinimum) {
+    window.AndroidOfficialDataBridge.fetchMoscowChildMinimum(String(year));
+    return;
+  }
+
+  fetch(MOSCOW_PM_SEARCH_URL, { headers: { "Accept": "text/html" } })
+    .then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.text();
+    })
+    .then((html) => {
+      const text = html.replace(/<[^>]+>/g, " ").replace(/&nbsp;|&#160;/g, " ").replace(/\s+/g, " ");
+      const amountMatch = text.match(/(?:для\s+детей|дети)[^\d]{0,120}(\d{2}[\s\u00a0]?\d{3})\s*(?:руб|₽)/i);
+      if (!amountMatch) throw new Error("На официальной странице значение не найдено");
+      window.onMoscowChildMinimumLoaded(JSON.stringify({
+        region: "Москва", year, amount: Number(amountMatch[1].replace(/\s/g,"")),
+        decreeNumber: "", decreeUrl: MOSCOW_PM_SEARCH_URL, fetchedAt: new Date().toISOString(), source: "mos.ru"
+      }));
+    })
+    .catch((error) => window.onMoscowChildMinimumError(error.message || String(error)));
+}
+
+window.onMoscowChildMinimumLoaded = function(payload) {
+  moscowPmRequestInProgress = false;
+  const button = byId("refreshMoscowPmBtn");
+  if (button) button.disabled = false;
+  try {
+    const data = typeof payload === "string" ? JSON.parse(payload) : payload;
+    if (!applyOfficialMoscowPm(data)) throw new Error("Официальное значение не распознано");
+  } catch (error) {
+    window.onMoscowChildMinimumError(error.message || String(error));
+  }
+};
+
+window.onMoscowChildMinimumError = function(message) {
+  moscowPmRequestInProgress = false;
+  const button = byId("refreshMoscowPmBtn");
+  if (button) button.disabled = false;
+  const cached = state.officialSubsistenceData;
+  if (cached && Number(cached.amount)) {
+    applyOfficialMoscowPm(cached, { save: false });
+    setMoscowPmStatus(`Не удалось проверить обновление. Используется последнее официальное значение ${money(Number(cached.amount))}.`, "warning");
+  } else {
+    setMoscowPmStatus(`Не удалось загрузить данные автоматически: ${message}. Проверьте интернет и нажмите «Обновить».`, "error");
+  }
+};
+
+function updateAlimonyRuleCalculation() {
+  const form = byId("alimonyRuleForm");
+  if (!form) return;
+  const calculationType = form.elements.calculationType.value || "subsistence";
+  const isSubsistence = calculationType === "subsistence";
+  document.querySelectorAll(".alimony-subsistence-field").forEach((field) => field.hidden = !isSubsistence);
+  form.elements.amountPerChild.readOnly = isSubsistence;
+  if (isSubsistence) {
+    const minimum = Math.max(0, Number(form.elements.subsistenceAmount.value) || 0);
+    const percent = Math.max(0, Number(form.elements.subsistencePercent.value) || 0);
+    form.elements.amountPerChild.value = minimum && percent ? (minimum * percent / 100).toFixed(2) : "";
+  }
+  const amount = Math.max(0, Number(form.elements.amountPerChild.value) || 0);
+  const children = Math.max(1, Number(form.elements.childrenCount.value) || 1);
+  const total = amount * children;
+  const preview = byId("alimonyRulePreview");
+  if (preview) {
+    preview.innerHTML = isSubsistence
+      ? `<div><span>Расчёт на одного ребёнка</span><strong>${money(amount)}</strong><small>${Number(form.elements.subsistencePercent.value || 0).toLocaleString("ru-RU")}% от ${money(Number(form.elements.subsistenceAmount.value) || 0)}</small></div><div><span>Начисление на ${children} детей</span><strong>${money(total)}</strong><small>за полный месяц</small></div>`
+      : `<div><span>На одного ребёнка</span><strong>${money(amount)}</strong></div><div><span>На ${children} детей</span><strong>${money(total)}</strong><small>за полный месяц</small></div>`;
+  }
+}
+
+function safeExternalUrl(value) {
+  const url = String(value || "").trim();
+  return /^https?:\/\//i.test(url) ? url : "";
+}
+
+byId("addAlimonyRuleBtn")?.addEventListener("click",()=>{const f=byId("alimonyRuleForm");f.reset();f.elements.effectiveFrom.value=new Date().toISOString().slice(0,7);f.elements.childrenCount.value=2;f.elements.calculationType.value="subsistence";f.elements.subsistenceRegion.value="Москва";f.elements.subsistencePercent.value=100;f.elements.openingDebt.value=state.alimonyRules.length?0:"";updateAlimonyRuleCalculation();byId("alimonyRuleDialog").showModal();requestMoscowChildMinimum();});
+byId("alimonyRuleForm")?.addEventListener("submit",event=>{event.preventDefault();const d=Object.fromEntries(new FormData(event.currentTarget).entries());const calculationType=d.calculationType||"fixed";const subsistenceAmount=Math.max(0,Number(d.subsistenceAmount)||0);const subsistencePercent=Math.max(0,Number(d.subsistencePercent)||0);const amountPerChild=calculationType==="subsistence"?subsistenceAmount*subsistencePercent/100:Math.max(0,Number(d.amountPerChild)||0);state.alimonyRules.push({id:`alimony-rule-${Date.now()}`,effectiveFrom:d.effectiveFrom,childrenCount:Number(d.childrenCount)||1,calculationType,subsistenceRegion:(d.subsistenceRegion||"").trim(),subsistenceAmount,subsistencePercent,amountPerChild,openingDebt:Number(d.openingDebt)||0,decreeNumber:(d.decreeNumber||"").trim(),decreeUrl:safeExternalUrl(d.decreeUrl),basis:(d.basis||"").trim()});saveState();byId("alimonyRuleDialog").close();renderAlimony();});
 byId("addAlimonyPaymentBtn")?.addEventListener("click",()=>{const f=byId("alimonyPaymentForm");f.reset();f.elements.date.value=new Date().toISOString().slice(0,10);populateAccountSelect();byId("alimonyAccountSelect").innerHTML=byId("txAccountSelect").innerHTML;byId("alimonyPaymentDialog").showModal();});
+byId("alimonyRuleForm")?.addEventListener("input",updateAlimonyRuleCalculation);
+byId("alimonyRuleForm")?.addEventListener("change",updateAlimonyRuleCalculation);
 byId("alimonyPaymentForm")?.addEventListener("submit",event=>{event.preventDefault();const d=Object.fromEntries(new FormData(event.currentTarget).entries());state.rows.push({id:`alimony-payment-${Date.now()}`,date:d.date,time:"12:00",description:d.description||"Алименты",amount:Math.abs(Number(d.amount)||0),balance:0,category:"Алименты",account:d.account,to:d.account,from:"",project:"Алименты",payee:d.payerName||"",payerName:d.payerName||"",payerType:d.payerType,paymentStatus:d.paymentStatus,comment:d.comment||"",alimonyPayment:true});saveState();byId("alimonyPaymentDialog").close();render();setView("alimony");});
 document.addEventListener("click",event=>{const b=event.target.closest(".delete-alimony-rule");if(!b)return;state.alimonyRules=state.alimonyRules.filter(r=>r.id!==b.dataset.ruleId);saveState();renderAlimony();});
 
@@ -3248,6 +3414,7 @@ function applyBackup(mode) {
     state.financialProducts = pendingBackupRestore.financialProducts;
     state.insurancePolicies = pendingBackupRestore.insurancePolicies;
     state.alimonyRules = pendingBackupRestore.alimonyRules;
+    state.officialSubsistenceData = pendingBackupRestore.officialSubsistenceData;
   } else {
     state.rows = mergeUnique(state.rows, pendingBackupRestore.rows, backupRowKey);
     state.accounts = mergeUnique(state.accounts, pendingBackupRestore.accounts, (item) => item.id || item.name);
@@ -3691,3 +3858,6 @@ byId("nativeReceiptScanBtn")?.addEventListener("click", () => {
 
 updateDatabaseStatus();
 window.addEventListener("beforeunload", saveState);
+
+byId("refreshMoscowPmBtn")?.addEventListener("click", () => requestMoscowChildMinimum({ force: true }));
+byId("alimonyRuleForm")?.elements?.effectiveFrom?.addEventListener("change", () => requestMoscowChildMinimum());
