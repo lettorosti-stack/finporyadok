@@ -5202,6 +5202,14 @@ byId('assetDocumentForm')?.addEventListener('submit',async e=>{e.preventDefault(
 document.addEventListener('click',e=>{const edit=e.target.closest('.edit-asset');if(edit){const a=state.assets.find(x=>x.id===edit.dataset.assetId);if(a)openAssetDialog(a);return;}const open=e.target.closest('.open-asset-details');if(open){const a=state.assets.find(x=>x.id===open.dataset.assetId);if(a)openAssetDetails(a);return;}const add=e.target.closest('.add-asset-document');if(add){const f=byId('assetDocumentForm');f.reset();f.elements.assetId.value=add.dataset.assetId;byId('assetDocumentDialog').showModal();return;}const del=e.target.closest('.delete-asset-document');if(del&&confirm('Удалить документ?')){const a=state.assets.find(x=>x.id===del.dataset.assetId);if(a){a.documents=(a.documents||[]).filter(d=>d.id!==del.dataset.documentId);saveState();render();openAssetDetails(a);}return;}const doc=e.target.closest('.open-asset-document');if(doc){const a=state.assets.find(x=>x.id===doc.dataset.assetId),d=a?.documents?.find(x=>x.id===doc.dataset.documentId);if(d?.dataUrl){const w=window.open();if(w)w.location.href=d.dataUrl;else{const link=document.createElement('a');link.href=d.dataUrl;link.download=d.fileName||d.name;link.click();}}}});
 
 // Package 10.1 — utilities and loan links for real estate and vehicles
+// Older databases may not yet contain the assets collection. Initialize it before
+// any Package 10 code reads or iterates it, otherwise app.js stops loading and
+// the Add asset button never receives its handler.
+if (!Array.isArray(state.assets)) state.assets = [];
+if (!Array.isArray(state.financialProducts)) state.financialProducts = [];
+if (!Array.isArray(state.regularPayments)) state.regularPayments = [];
+if (!Array.isArray(state.insurancePolicies)) state.insurancePolicies = [];
+if (!Array.isArray(state.familyMembers)) state.familyMembers = [];
 state.assets.forEach((asset) => {
   if (!Array.isArray(asset.utilityPaymentIds)) asset.utilityPaymentIds = [];
   if (asset.loanProductId == null) asset.loanProductId = '';
