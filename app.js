@@ -5193,7 +5193,7 @@ function renderAssets(){
 function openAssetDialog(asset=null){ const f=byId('assetForm');if(!f)return;f.reset();populateAssetSelectors();activeAssetId=asset?.id||null;byId('assetDialogTitle').textContent=asset?'Изменить имущество':'Добавить имущество';byId('deleteAssetBtn').hidden=!asset;if(asset)Object.entries(asset).forEach(([k,v])=>{if(f.elements[k]&&k!=='documents')f.elements[k].value=v??'';});else{f.elements.ownerMemberId.value=assetMember()?.id||'family-tatiana';}byId('assetDialog').showModal(); }
 function openAssetDetails(asset){ activeAssetId=asset.id;const docs=Array.isArray(asset.documents)?asset.documents:[],policy=state.insurancePolicies.find(p=>p.id===asset.insurancePolicyId);byId('assetDetailsTitle').textContent=asset.name;byId('assetDetailsSubtitle').textContent=`${assetTypeLabel(asset.type)} • ${assetOwnerName(asset.ownerMemberId)}`;byId('assetDetailsBody').innerHTML=`<div class="asset-detail-grid"><div><span>Покупка</span><strong>${asset.purchaseDate?formatTransactionDate(asset.purchaseDate):'—'}</strong><small>${money(asset.purchasePrice)}</small></div><div><span>Текущая стоимость</span><strong>${money(asset.currentValue||asset.purchasePrice)}</strong></div><div><span>Серийный номер / VIN</span><strong>${escapeHtml(asset.serialNumber||'—')}</strong></div><div><span>Страховка</span><strong>${escapeHtml(policy?.objectName||policy?.name||'Не связана')}</strong></div></div><h3>Сроки</h3><div class="asset-deadlines">${assetDeadlineItems(asset).map(d=>`<span class="asset-deadline ${d.days!==null&&d.days<=7&&d.days>=0?'due':''}">${escapeHtml(d.label)} • ${formatTransactionDate(d.date)}</span>`).join('')||'<span class="muted">Сроки не заданы</span>'}</div>${asset.notes?`<p>${escapeHtml(asset.notes)}</p>`:''}<div class="panel-head"><div><h3>Документы</h3><p>Чеки, гарантии, договоры и обслуживание</p></div><button class="primary add-asset-document" data-asset-id="${escapeHtml(asset.id)}">+ Документ</button></div><div class="asset-doc-list">${docs.length?docs.map(d=>`<article class="asset-doc-row"><div><strong>${escapeHtml(d.name)}</strong><small>${escapeHtml(d.fileName||'Без файла')}${d.expiryDate?` • до ${formatTransactionDate(d.expiryDate)}`:''}</small></div><div class="asset-doc-actions">${d.dataUrl?`<button class="ghost open-asset-document" data-asset-id="${escapeHtml(asset.id)}" data-document-id="${escapeHtml(d.id)}">Открыть</button>`:''}<button class="icon-button delete-asset-document" data-asset-id="${escapeHtml(asset.id)}" data-document-id="${escapeHtml(d.id)}">🗑</button></div></article>`).join(''):'<p class="muted">Документы ещё не добавлены.</p>'}</div>`;byId('assetDetailsDialog').showModal(); }
 function fileAsDataUrl(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file);});}
-byId('addAssetBtn')?.addEventListener('click',()=>openAssetDialog());
+
 ['assetTypeFilter','assetOwnerFilter'].forEach(id=>byId(id)?.addEventListener('change',renderAssets));byId('assetSearch')?.addEventListener('input',renderAssets);
 byId('assetForm')?.addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries()),old=state.assets.find(a=>a.id===d.assetId);const obj={...(old||{}),id:old?.id||`asset-${Date.now()}`,type:d.type,name:d.name,ownerMemberId:d.ownerMemberId||assetMember()?.id||'family-tatiana',purchaseDate:d.purchaseDate||'',purchasePrice:Number(d.purchasePrice)||0,currentValue:Number(d.currentValue)||0,location:d.location||'',serialNumber:d.serialNumber||'',warrantyEndDate:d.warrantyEndDate||'',serviceDate:d.serviceDate||'',taxDate:d.taxDate||'',insurancePolicyId:d.insurancePolicyId||'',notes:d.notes||'',documents:Array.isArray(old?.documents)?old.documents:[]};const i=state.assets.findIndex(a=>a.id===obj.id);if(i>=0)state.assets[i]=obj;else state.assets.push(obj);saveState();byId('assetDialog').close();render();setView('assets');});
 byId('deleteAssetBtn')?.addEventListener('click',()=>{if(activeAssetId&&confirm('Удалить карточку имущества и вложенные документы?')){state.assets=state.assets.filter(a=>a.id!==activeAssetId);saveState();byId('assetDialog').close();render();}});
@@ -5283,7 +5283,10 @@ openAssetDialog = function openAssetDialogWithLinks(asset = null) {
   }
   renderAssetUtilityChecks(asset);
   updateAssetLinkFields();
-  byId('assetDialog').showModal();
+  const dialog = byId('assetDialog');
+  if (!dialog) return;
+  if (typeof dialog.showModal === 'function') dialog.showModal();
+  else dialog.setAttribute('open', '');
 };
 
 openAssetDetails = function openAssetDetailsWithLinks(asset) {
@@ -5356,6 +5359,14 @@ byId('assetForm')?.addEventListener('submit', (event) => {
 }, true);
 
 document.addEventListener('click', (event) => {
+  const addAssetButton = event.target.closest('#addAssetBtn');
+  if (addAssetButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    openAssetDialog(null);
+    return;
+  }
+
   const utilitiesButton = event.target.closest('.open-asset-utilities');
   if (utilitiesButton) {
     byId('assetDetailsDialog')?.close();
