@@ -498,6 +498,8 @@
 </section>
 </section>
 <section class="view" id="import">
+<section class="panel reconciliation-center"><div class="panel-head"><div><h2>Центр сверки</h2><p>Без категории, вероятные дубли и возвраты</p></div><span class="tag" id="reconciliationCount">0</span></div><div class="stack" id="reconciliationList"></div></section>
+<section class="panel import-rules"><div class="panel-head"><div><h2>Умные правила импорта</h2><p>Автоматически назначают категорию, счёт и проект по продавцу или описанию</p></div><div class="button-row"><button id="applyAllImportRulesBtn" type="button">Применить все</button><button class="primary" id="addImportRuleBtn" type="button">+ Правило</button></div></div><div class="stack" id="importRulesList"></div></section>
 <section class="panel import-panel">
 <div class="panel-head">
 <div>
@@ -590,7 +592,7 @@
 <div class="planning-grid"><section class="panel"><div class="panel-head"><div><h3>Лимиты по категориям</h3><p>Каждая сумма открывает исходные операции</p></div><button id="addBudgetPlanBtn">+ Лимит</button></div><div class="stack" id="budgetPlanList"></div></section><section class="panel"><div class="panel-head"><div><h3>Цели и накопления</h3><p>Резервный фонд и крупные покупки</p></div><button id="addSavingsGoalBtn">+ Цель</button></div><div class="stack" id="savingsGoalList"></div></section></div>
 <section class="panel forecast-settings"><div><h3>Неснижаемый резерв</h3><p>Эта сумма вычитается из прогнозного свободного остатка.</p></div><label>Сумма <input id="forecastReserve" type="number" min="0" step="100" value="0"></label></section>
 </section>
-<dialog id="budgetPlanDialog"><form method="dialog" id="budgetPlanForm"><header><div><h2>Лимит категории</h2><p>Для выбранного месяца</p></div><button data-close type="button">×</button></header><label>Категория<input name="category" required></label><label>Лимит, ₽<input name="limit" type="number" min="0" required></label><label class="check-row"><input name="rollover" type="checkbox"> Переносить остаток</label><footer><button data-close type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></footer></form></dialog>
+<dialog id="budgetPlanDialog"><form method="dialog" id="budgetPlanForm"><header><div><h2>Лимит категории</h2><p>Для выбранного месяца</p></div><button data-close type="button">×</button></header><label>Категория<select id="budgetPlanCategory" name="category" required><option value="">Выберите категорию</option></select></label><label>Для кого<select id="budgetPlanMember" name="memberId"><option value="family">Вся семья</option></select><small>Можно задать отдельный лимит для каждого ребёнка.</small></label><label>Лимит, ₽<input name="limit" type="number" min="0" required></label><label class="check-row"><input name="rollover" type="checkbox"> Переносить остаток</label><footer><button data-close type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></footer></form></dialog>
 <dialog id="savingsGoalDialog"><form method="dialog" id="savingsGoalForm"><header><div><h2>Новая цель</h2><p>Сумма, срок и текущие накопления</p></div><button data-close type="button">×</button></header><label>Название<input name="name" required></label><label>Нужно накопить, ₽<input name="target" type="number" min="0" required></label><label>Уже накоплено, ₽<input name="current" type="number" min="0" value="0"></label><label>Срок<input name="deadline" type="date"></label><label>Счёт<input name="account"></label><footer><button data-close type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></footer></form></dialog>
 
 <section class="view" id="settings">
@@ -1152,5 +1154,6 @@
 
 <script src="./andromoney-data.js"></script>
 <script src="./app.js"></script>
+<dialog id="importRuleDialog"><form method="dialog" id="importRuleForm"><header><div><h2>Правило импорта</h2><p>Совпадение ищется в продавце и описании операции</p></div><button data-close type="button">×</button></header><label>Текст содержит<input name="contains" required placeholder="например, Пятёрочка"></label><label>Категория<input name="category" placeholder="Продукты"></label><label>Счёт<input name="account" placeholder="Т-Банк"></label><label>Проект<input name="project" placeholder="Дом"></label><footer><button data-close type="button">Отмена</button><button class="primary" type="submit">Сохранить и применить</button></footer></form></dialog>
 </body>
 </html>

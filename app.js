@@ -3,7 +3,7 @@ const storeKey = "finporyadok.state.alzex.v1";
   try { localStorage.removeItem(legacyKey); } catch {}
 });
 const seedRows = window.ANDROMONEY_DATA?.rows || [];
-const CURRENT_SCHEMA_VERSION = 7;
+const CURRENT_SCHEMA_VERSION = 8;
 const savedState = loadState();
 
 const state = {
@@ -25,6 +25,8 @@ const state = {
   budgetPlans: Array.isArray(savedState.budgetPlans) ? savedState.budgetPlans : [],
   savingsGoals: Array.isArray(savedState.savingsGoals) ? savedState.savingsGoals : [],
   forecastSettings: savedState.forecastSettings && typeof savedState.forecastSettings === "object" ? savedState.forecastSettings : { reserve: 0, horizonDays: 30 },
+  importRules: Array.isArray(savedState.importRules) ? savedState.importRules : [],
+  reconciliationReviewed: savedState.reconciliationReviewed && typeof savedState.reconciliationReviewed === "object" ? savedState.reconciliationReviewed : {},
   shopping: savedState.shopping.length ? savedState.shopping : [
     { name: "Молоко", qty: "2 л", days: 4, price: 92 },
     { name: "Корм", qty: "3 кг", days: 26, price: 1450 },
@@ -104,6 +106,11 @@ function migrateStoredState(raw) {
     saved.forecastSettings = saved.forecastSettings && typeof saved.forecastSettings === "object" ? saved.forecastSettings : { reserve: 0, horizonDays: 30 };
     version = 7;
   }
+  if (version < 8) {
+    saved.importRules = Array.isArray(saved.importRules) ? saved.importRules : [];
+    saved.reconciliationReviewed = saved.reconciliationReviewed && typeof saved.reconciliationReviewed === "object" ? saved.reconciliationReviewed : {};
+    version = 8;
+  }
   saved.schemaVersion = CURRENT_SCHEMA_VERSION;
   return saved;
 }
@@ -154,10 +161,12 @@ function loadState() {
       familyActivityLog: Array.isArray(saved?.familyActivityLog) ? saved.familyActivityLog : [],
       budgetPlans: Array.isArray(saved?.budgetPlans) ? saved.budgetPlans : [],
       savingsGoals: Array.isArray(saved?.savingsGoals) ? saved.savingsGoals : [],
-      forecastSettings: saved?.forecastSettings && typeof saved.forecastSettings === "object" ? saved.forecastSettings : { reserve: 0, horizonDays: 30 }
+      forecastSettings: saved?.forecastSettings && typeof saved.forecastSettings === "object" ? saved.forecastSettings : { reserve: 0, horizonDays: 30 },
+      importRules: Array.isArray(saved?.importRules) ? saved.importRules : [],
+      reconciliationReviewed: saved?.reconciliationReviewed && typeof saved.reconciliationReviewed === "object" ? saved.reconciliationReviewed : {}
     };
   } catch {}
-  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], shoppingAliases: {}, financialProducts: [], insurancePolicies: [], alimonyRules: [], regularPayments: [], plannedPaymentStates: {}, familyMembers: [], activeMemberId: "family-tatiana", familyActivityLog: [], budgetPlans: [], savingsGoals: [], forecastSettings: { reserve: 0, horizonDays: 30 } };
+  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], shoppingAliases: {}, financialProducts: [], insurancePolicies: [], alimonyRules: [], regularPayments: [], plannedPaymentStates: {}, familyMembers: [], activeMemberId: "family-tatiana", familyActivityLog: [], budgetPlans: [], savingsGoals: [], forecastSettings: { reserve: 0, horizonDays: 30 }, importRules: [], reconciliationReviewed: {} };
 }
 
 function saveState() {
@@ -184,7 +193,9 @@ function saveState() {
     familyActivityLog: state.familyActivityLog,
     budgetPlans: state.budgetPlans,
     savingsGoals: state.savingsGoals,
-    forecastSettings: state.forecastSettings
+    forecastSettings: state.forecastSettings,
+    importRules: state.importRules,
+    reconciliationReviewed: state.reconciliationReviewed
   }));
   localStorage.setItem(`${storeKey}.lastSavedAt`, savedAt);
   updateDatabaseStatus();
@@ -4953,15 +4964,43 @@ function renderPlanning(){
   if(byId('planningAvailable')) byId('planningAvailable').textContent=moneyText(forecast);
   if(byId('planningAvailable')) byId('planningAvailable').className=forecast<0?'bad':'good';
   if(byId('planningMeta')) byId('planningMeta').textContent=`Лимиты: ${moneyText(planned)} · ожидаемые платежи: ${moneyText(regular)} · резерв: ${moneyText(reserve)}`;
-  const byCat={}; rows.forEach(r=>{const v=expenseValue(r);if(v){const c=r.category||'Без категории';byCat[c]=(byCat[c]||0)+v;}});
-  const list=byId('budgetPlanList'); if(list){ const plans=state.budgetPlans.filter(x=>x.month===month); list.innerHTML=plans.length?plans.map(p=>{const spent=byCat[p.category]||0, pct=p.limit?Math.min(999,Math.round(spent/p.limit*100)):0; return `<article class="budget-plan-card" data-budget-id="${escapeHtml(p.id)}"><div><strong>${escapeHtml(p.category)}</strong><small>${moneyText(spent)} из ${moneyText(p.limit)}</small></div><div class="budget-progress"><i style="width:${Math.min(100,pct)}%"></i></div><span class="${pct>100?'bad':pct>80?'warn':'good'}">${pct}%</span><button data-budget-open="${escapeHtml(p.category)}" type="button">Операции</button><button data-budget-delete="${escapeHtml(p.id)}" type="button">×</button></article>`}).join(''):'<article class="empty-state"><strong>Лимиты не заданы</strong><p>Добавьте бюджет по категории на выбранный месяц.</p></article>'; }
+  const list=byId('budgetPlanList'); if(list){ const plans=state.budgetPlans.filter(x=>x.month===month); list.innerHTML=plans.length?plans.map(p=>{const ownerId=p.memberId||'family'; const owner=ownerId==='family'?null:state.familyMembers.find(m=>m.id===ownerId); const spent=rows.filter(r=>ownerId==='family'||r.memberId===ownerId).reduce((sum,r)=>sum+((r.category||'Без категории')===p.category?expenseValue(r):0),0); const pct=p.limit?Math.min(999,Math.round(spent/p.limit*100)):0; const ownerLabel=owner?` · ${escapeHtml(owner.name)}`:' · Вся семья'; return `<article class="budget-plan-card" data-budget-id="${escapeHtml(p.id)}"><div><strong>${escapeHtml(p.category)}</strong><small>${moneyText(spent)} из ${moneyText(p.limit)}${ownerLabel}</small></div><div class="budget-progress"><i style="width:${Math.min(100,pct)}%"></i></div><span class="${pct>100?'bad':pct>80?'warn':'good'}">${pct}%</span><button data-budget-open="${escapeHtml(p.category)}" data-budget-member="${escapeHtml(ownerId)}" type="button">Операции</button><button data-budget-delete="${escapeHtml(p.id)}" type="button">×</button></article>`}).join(''):'<article class="empty-state"><strong>Лимиты не заданы</strong><p>Добавьте бюджет по категории на выбранный месяц.</p></article>'; }
   const goals=byId('savingsGoalList'); if(goals){ goals.innerHTML=state.savingsGoals.length?state.savingsGoals.map(g=>{const current=Number(g.current||0), target=Number(g.target||0), pct=target?Math.min(100,Math.round(current/target*100)):0; return `<article class="goal-card"><div><strong>${escapeHtml(g.name)}</strong><small>${moneyText(current)} из ${moneyText(target)}${g.deadline?` · до ${escapeHtml(g.deadline)}`:''}</small></div><div class="budget-progress"><i style="width:${pct}%"></i></div><span>${pct}%</span><button data-goal-add="${escapeHtml(g.id)}" type="button">Пополнить</button><button data-goal-delete="${escapeHtml(g.id)}" type="button">×</button></article>`}).join(''):'<article class="empty-state"><strong>Целей пока нет</strong><p>Создайте резервный фонд или цель для крупной покупки.</p></article>'; }
 }
 byId('planningMonth')?.addEventListener('change',e=>{localStorage.setItem(planningMonthKey,e.target.value);renderPlanning();});
-byId('addBudgetPlanBtn')?.addEventListener('click',()=>byId('budgetPlanDialog')?.showModal());
-byId('budgetPlanForm')?.addEventListener('submit',e=>{e.preventDefault();const f=new FormData(e.target);state.budgetPlans.push({id:`budget-${Date.now()}`,month:planningMonth(),category:String(f.get('category')||'Без категории'),limit:Number(f.get('limit')||0),rollover:Boolean(f.get('rollover'))});saveState();e.target.reset();byId('budgetPlanDialog')?.close();renderPlanning();});
+function populateBudgetPlanSelectors(){
+  const category=byId('budgetPlanCategory');
+  if(category){ const names=categoryNamesByType('expense'); category.innerHTML='<option value="">Выберите категорию</option>'+names.map(name=>`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join(''); }
+  const member=byId('budgetPlanMember');
+  if(member){ member.innerHTML='<option value="family">Вся семья</option>'+state.familyMembers.map(item=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.role==='child'?' — ребёнок':''}</option>`).join(''); }
+}
+byId('addBudgetPlanBtn')?.addEventListener('click',()=>{populateBudgetPlanSelectors();byId('budgetPlanDialog')?.showModal();});
+byId('budgetPlanForm')?.addEventListener('submit',e=>{e.preventDefault();const f=new FormData(e.target);const category=String(f.get('category')||'').trim();if(!category)return;state.budgetPlans.push({id:`budget-${Date.now()}`,month:planningMonth(),category,memberId:String(f.get('memberId')||'family'),limit:Number(f.get('limit')||0),rollover:Boolean(f.get('rollover'))});saveState();e.target.reset();byId('budgetPlanDialog')?.close();renderPlanning();});
 byId('addSavingsGoalBtn')?.addEventListener('click',()=>byId('savingsGoalDialog')?.showModal());
 byId('savingsGoalForm')?.addEventListener('submit',e=>{e.preventDefault();const f=new FormData(e.target);state.savingsGoals.push({id:`goal-${Date.now()}`,name:String(f.get('name')||'Цель'),target:Number(f.get('target')||0),current:Number(f.get('current')||0),deadline:String(f.get('deadline')||''),account:String(f.get('account')||'')});saveState();e.target.reset();byId('savingsGoalDialog')?.close();renderPlanning();});
 byId('forecastReserve')?.addEventListener('change',e=>{state.forecastSettings.reserve=Number(e.target.value||0);saveState();renderPlanning();});
 document.addEventListener('click',e=>{const b=e.target.closest('[data-budget-delete]');if(b){state.budgetPlans=state.budgetPlans.filter(x=>x.id!==b.dataset.budgetDelete);saveState();renderPlanning();}const g=e.target.closest('[data-goal-delete]');if(g){state.savingsGoals=state.savingsGoals.filter(x=>x.id!==g.dataset.goalDelete);saveState();renderPlanning();}const a=e.target.closest('[data-goal-add]');if(a){const goal=state.savingsGoals.find(x=>x.id===a.dataset.goalAdd);if(goal){const v=Number(prompt('Сумма пополнения', '0')||0);if(v){goal.current=Number(goal.current||0)+v;saveState();renderPlanning();}}}const o=e.target.closest('[data-budget-open]');if(o&&typeof openDrilldown==='function')openDrilldown('category',o.dataset.budgetOpen);});
 renderPlanning();
+
+
+// PACKAGE 8 — reconciliation and smart import rules
+function normalizeRuleText(v){return String(v||'').trim().toLowerCase().replace(/\s+/g,' ');}
+function reconciliationCandidates(){
+ const rows=state.rows.filter(r=>!state.reconciliationReviewed[r.id]); const out=[];
+ rows.forEach(r=>{if(!r.category||/без категор/i.test(r.category))out.push({kind:'uncategorized',row:r,label:'Без категории'});});
+ const seen=new Map(); rows.forEach(r=>{const key=[String(r.date||'').slice(0,10),Math.round(Math.abs(Number(r.amount)||0)*100),normalizeRuleText(r.description||r.payee)].join('|');if(seen.has(key))out.push({kind:'duplicate',row:r,other:seen.get(key),label:'Возможный дубль'});else seen.set(key,r);});
+ rows.forEach(r=>{if(/возврат|refund|refunds/i.test(`${r.description||''} ${r.payee||''}`))out.push({kind:'refund',row:r,label:'Возможный возврат'});});
+ return out;
+}
+function renderReconciliationCenter(){
+ const box=byId('reconciliationList'); if(!box)return; const items=reconciliationCandidates();
+ byId('reconciliationCount').textContent=String(items.length);
+ box.innerHTML=items.length?items.slice(0,100).map(x=>`<article class="reconcile-row"><span class="tag">${escapeHtml(x.label)}</span><div><strong>${escapeHtml(x.row.description||x.row.payee||'Операция')}</strong><small>${escapeHtml(String(x.row.date||''))} · ${moneyText(Math.abs(Number(x.row.amount)||0))} · ${escapeHtml(x.row.account||'Без счёта')}</small></div><button data-reconcile-open="${escapeHtml(x.row.id)}" type="button">Открыть</button><button data-reconcile-reviewed="${escapeHtml(x.row.id)}" type="button">Проверено</button></article>`).join(''):'<article class="empty-state"><strong>Всё сверено</strong><p>Неразобранных операций и вероятных дублей нет.</p></article>';
+ const rules=byId('importRulesList'); if(rules)rules.innerHTML=state.importRules.length?state.importRules.map(r=>`<article class="rule-row"><div><strong>${escapeHtml(r.contains)}</strong><small>${escapeHtml(r.category||'Категория не меняется')} · ${escapeHtml(r.account||'Счёт не меняется')}</small></div><span>${r.applied||0} применений</span><button data-rule-run="${escapeHtml(r.id)}" type="button">Применить</button><button data-rule-delete="${escapeHtml(r.id)}" type="button">×</button></article>`).join(''):'<article class="empty-state"><strong>Правил нет</strong><p>Создайте правило для автоматической категории или счёта.</p></article>';
+}
+function applyImportRule(rule){let count=0;const needle=normalizeRuleText(rule.contains);state.rows.forEach(row=>{const hay=normalizeRuleText(`${row.payee||''} ${row.description||''} ${row.merchant||''}`);if(needle&&hay.includes(needle)){if(rule.category)row.category=rule.category;if(rule.account)row.account=rule.account;if(rule.project)row.project=rule.project;count++;}});rule.applied=Number(rule.applied||0)+count;rule.lastAppliedAt=new Date().toISOString();saveState();render();renderReconciliationCenter();return count;}
+byId('addImportRuleBtn')?.addEventListener('click',()=>byId('importRuleDialog')?.showModal());
+byId('importRuleForm')?.addEventListener('submit',e=>{e.preventDefault();const f=new FormData(e.target);const rule={id:`rule-${Date.now()}`,contains:String(f.get('contains')||''),category:String(f.get('category')||''),account:String(f.get('account')||''),project:String(f.get('project')||''),applied:0};state.importRules.push(rule);saveState();e.target.reset();byId('importRuleDialog')?.close();applyImportRule(rule);});
+byId('applyAllImportRulesBtn')?.addEventListener('click',()=>{let total=0;state.importRules.forEach(r=>total+=applyImportRule(r));alert(`Обновлено операций: ${total}`);});
+document.addEventListener('click',e=>{const rr=e.target.closest('[data-rule-run]');if(rr){const r=state.importRules.find(x=>x.id===rr.dataset.ruleRun);if(r)alert(`Обновлено операций: ${applyImportRule(r)}`);}const rd=e.target.closest('[data-rule-delete]');if(rd){state.importRules=state.importRules.filter(x=>x.id!==rd.dataset.ruleDelete);saveState();renderReconciliationCenter();}const rv=e.target.closest('[data-reconcile-reviewed]');if(rv){state.reconciliationReviewed[rv.dataset.reconcileReviewed]=new Date().toISOString();saveState();renderReconciliationCenter();}const ro=e.target.closest('[data-reconcile-open]');if(ro){const row=state.rows.find(x=>x.id===ro.dataset.reconcileOpen);if(row&&typeof openDrilldown==='function')openDrilldown('row',row.id);}});
+renderReconciliationCenter();
