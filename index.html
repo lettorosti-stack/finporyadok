@@ -617,7 +617,7 @@
 
 
 <section class="view" id="assets">
-<div class="panel-head page-actions"><div><h2>Имущество, документы и гарантии</h2><p>Единая картотека недвижимости, автомобилей, техники и важных документов</p></div><button class="primary" id="addAssetBtn" type="button" onclick="return window.openAssetFormDirect(event)">+ Добавить имущество</button></div>
+<div class="panel-head page-actions"><div><h2>Имущество, документы и гарантии</h2><p>Единая картотека недвижимости, автомобилей, техники и важных документов</p></div><button class="primary" id="addAssetBtn" type="button">+ Добавить имущество</button></div>
 <div class="metric-grid four"><article class="metric"><span>Общая стоимость</span><strong id="assetTotalValue">0 ₽</strong></article><article class="metric"><span>Объектов</span><strong id="assetCount">0</strong></article><article class="metric"><span>На гарантии</span><strong id="assetWarrantyCount">0</strong></article><article class="metric"><span>Ближайшие сроки</span><strong id="assetDeadlineCount">0</strong></article></div>
 <section class="panel"><div class="filter-grid"><label>Тип<select id="assetTypeFilter"><option value="all">Все типы</option><option value="realEstate">Недвижимость</option><option value="vehicle">Автомобиль</option><option value="appliance">Техника</option><option value="valuable">Ценная покупка</option><option value="other">Прочее</option></select></label><label>Владелец<select id="assetOwnerFilter"><option value="all">Все владельцы</option></select></label><label>Поиск<input id="assetSearch" placeholder="Название, адрес, серийный номер"></label></div></section>
 <div class="asset-grid" id="assetCards"></div>
@@ -1234,5 +1234,74 @@
 <script src="./andromoney-data.js"></script>
 <script src="./app.js"></script>
 <dialog id="importRuleDialog"><form method="dialog" id="importRuleForm"><header><div><h2>Правило импорта</h2><p>Совпадение ищется в продавце и описании операции</p></div><button data-close type="button">×</button></header><label>Текст содержит<input name="contains" required placeholder="например, Пятёрочка"></label><label>Категория<input name="category" placeholder="Продукты"></label><label>Счёт<input name="account" placeholder="Т-Банк"></label><label>Проект<input name="project" placeholder="Дом"></label><footer><button data-close type="button">Отмена</button><button class="primary" type="submit">Сохранить и применить</button></footer></form></dialog>
+
+<script>
+(function () {
+  function openAssetFallback(event) {
+    if (event) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+    var dialog = document.getElementById('assetDialog');
+    var form = document.getElementById('assetForm');
+    if (!dialog || !form) {
+      window.alert('Форма имущества не найдена в приложении.');
+      return false;
+    }
+
+    try { form.reset(); } catch (ignore) {}
+    var title = document.getElementById('assetDialogTitle');
+    if (title) title.textContent = 'Добавить имущество';
+    var deleteButton = document.getElementById('deleteAssetBtn');
+    if (deleteButton) deleteButton.hidden = true;
+
+    dialog.classList.add('asset-dialog-force-open');
+    dialog.hidden = false;
+    dialog.setAttribute('open', '');
+    dialog.style.display = 'block';
+    dialog.style.position = 'fixed';
+    dialog.style.zIndex = '2147483647';
+    dialog.style.left = '50%';
+    dialog.style.top = '50%';
+    dialog.style.transform = 'translate(-50%, -50%)';
+    dialog.style.maxHeight = '92vh';
+    dialog.style.overflow = 'auto';
+
+    try {
+      if (typeof dialog.showModal === 'function' && !dialog.open) dialog.showModal();
+    } catch (ignore) {}
+    return false;
+  }
+
+  function closeAssetFallback() {
+    var dialog = document.getElementById('assetDialog');
+    if (!dialog) return;
+    dialog.classList.remove('asset-dialog-force-open');
+    dialog.style.removeProperty('display');
+    dialog.style.removeProperty('position');
+    dialog.style.removeProperty('z-index');
+    dialog.style.removeProperty('left');
+    dialog.style.removeProperty('top');
+    dialog.style.removeProperty('transform');
+    dialog.style.removeProperty('max-height');
+    dialog.style.removeProperty('overflow');
+    try { if (typeof dialog.close === 'function' && dialog.open) dialog.close(); }
+    catch (ignore) { dialog.removeAttribute('open'); }
+  }
+
+  document.addEventListener('click', function (event) {
+    var addButton = event.target && event.target.closest ? event.target.closest('#addAssetBtn') : null;
+    if (addButton) return openAssetFallback(event);
+    var closeButton = event.target && event.target.closest ? event.target.closest('#assetDialog [data-close]') : null;
+    if (closeButton) {
+      event.preventDefault();
+      closeAssetFallback();
+    }
+  }, true);
+
+  window.openAssetFormFallback = openAssetFallback;
+})();
+</script>
+
 </body>
 </html>

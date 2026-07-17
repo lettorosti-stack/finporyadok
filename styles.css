@@ -1471,3 +1471,6 @@ body[data-family-role="child"] .admin-only{display:none!important}
 .asset-linked-row:last-child{border-bottom:0}
 .asset-linked-row small{display:block;color:var(--muted,#65727a);margin-top:3px}
 @media(max-width:640px){.asset-link-checks{grid-template-columns:1fr}.asset-linked-row{align-items:flex-start;flex-direction:column}}
+
+.asset-dialog-force-open{display:block!important;position:fixed!important;inset:auto!important;left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;z-index:2147483647!important;background:var(--panel,#fff)!important;border:1px solid var(--line,#dbe5ea)!important;border-radius:18px!important;box-shadow:0 24px 80px rgba(0,0,0,.28)!important;padding:0!important;}
+.asset-dialog-force-open::backdrop{background:rgba(20,32,38,.45)!important;}
