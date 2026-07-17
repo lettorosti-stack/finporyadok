@@ -3,7 +3,7 @@ const storeKey = "finporyadok.state.alzex.v1";
   try { localStorage.removeItem(legacyKey); } catch {}
 });
 const seedRows = window.ANDROMONEY_DATA?.rows || [];
-const CURRENT_SCHEMA_VERSION = 6;
+const CURRENT_SCHEMA_VERSION = 7;
 const savedState = loadState();
 
 const state = {
@@ -22,6 +22,9 @@ const state = {
   familyMembers: Array.isArray(savedState.familyMembers) ? savedState.familyMembers : [],
   activeMemberId: savedState.activeMemberId || "family-tatiana",
   familyActivityLog: Array.isArray(savedState.familyActivityLog) ? savedState.familyActivityLog : [],
+  budgetPlans: Array.isArray(savedState.budgetPlans) ? savedState.budgetPlans : [],
+  savingsGoals: Array.isArray(savedState.savingsGoals) ? savedState.savingsGoals : [],
+  forecastSettings: savedState.forecastSettings && typeof savedState.forecastSettings === "object" ? savedState.forecastSettings : { reserve: 0, horizonDays: 30 },
   shopping: savedState.shopping.length ? savedState.shopping : [
     { name: "Молоко", qty: "2 л", days: 4, price: 92 },
     { name: "Корм", qty: "3 кг", days: 26, price: 1450 },
@@ -49,6 +52,7 @@ const views = {
   shopping: ["Покупки", "Список, прогноз повторных покупок и история цен."],
   reports: ["Отчеты", "Категории, проекты, доходы, расходы и экспорт."],
   import: ["Импорт", "Загрузка CSV, предпросмотр и подготовка к проверке."],
+  planning: ["Бюджет и цели", "Лимиты, накопления и прогноз остатка денег."],
   settings: ["Настройки", "Офлайн-режим, синхронизация и безопасность."]
 };
 
@@ -93,6 +97,12 @@ function migrateStoredState(raw) {
   if (version < 6) {
     saved.syncMeta = saved.syncMeta && typeof saved.syncMeta === "object" ? saved.syncMeta : {};
     version = 6;
+  }
+  if (version < 7) {
+    saved.budgetPlans = Array.isArray(saved.budgetPlans) ? saved.budgetPlans : [];
+    saved.savingsGoals = Array.isArray(saved.savingsGoals) ? saved.savingsGoals : [];
+    saved.forecastSettings = saved.forecastSettings && typeof saved.forecastSettings === "object" ? saved.forecastSettings : { reserve: 0, horizonDays: 30 };
+    version = 7;
   }
   saved.schemaVersion = CURRENT_SCHEMA_VERSION;
   return saved;
@@ -141,10 +151,13 @@ function loadState() {
         { id: "family-diana", name: "Диана", role: "child", color: "amber", pin: "", allowance: 0, canAddOperations: true, canSeeFamilyTotals: false, active: true }
       ],
       activeMemberId: saved?.activeMemberId || "family-tatiana",
-      familyActivityLog: Array.isArray(saved?.familyActivityLog) ? saved.familyActivityLog : []
+      familyActivityLog: Array.isArray(saved?.familyActivityLog) ? saved.familyActivityLog : [],
+      budgetPlans: Array.isArray(saved?.budgetPlans) ? saved.budgetPlans : [],
+      savingsGoals: Array.isArray(saved?.savingsGoals) ? saved.savingsGoals : [],
+      forecastSettings: saved?.forecastSettings && typeof saved.forecastSettings === "object" ? saved.forecastSettings : { reserve: 0, horizonDays: 30 }
     };
   } catch {}
-  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], shoppingAliases: {}, financialProducts: [], insurancePolicies: [], alimonyRules: [], regularPayments: [], plannedPaymentStates: {}, familyMembers: [], activeMemberId: "family-tatiana", familyActivityLog: [] };
+  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], shoppingAliases: {}, financialProducts: [], insurancePolicies: [], alimonyRules: [], regularPayments: [], plannedPaymentStates: {}, familyMembers: [], activeMemberId: "family-tatiana", familyActivityLog: [], budgetPlans: [], savingsGoals: [], forecastSettings: { reserve: 0, horizonDays: 30 } };
 }
 
 function saveState() {
@@ -168,7 +181,10 @@ function saveState() {
     officialSubsistenceByYear: state.officialSubsistenceByYear,
     familyMembers: state.familyMembers,
     activeMemberId: state.activeMemberId,
-    familyActivityLog: state.familyActivityLog
+    familyActivityLog: state.familyActivityLog,
+    budgetPlans: state.budgetPlans,
+    savingsGoals: state.savingsGoals,
+    forecastSettings: state.forecastSettings
   }));
   localStorage.setItem(`${storeKey}.lastSavedAt`, savedAt);
   updateDatabaseStatus();
@@ -4914,3 +4930,38 @@ byId("cloudAutoSync")?.addEventListener("change",e=>{const meta=cloudMeta();meta
 byId("cloudHistoryBtn")?.addEventListener("click",()=>{renderCloudHistory();byId("cloudHistoryDialog")?.showModal();});
 renderCloudSyncStatus();renderCloudHistory();
 if(nativeCloudAvailable())setTimeout(()=>window.AndroidCloudSync.getCloudStatus(),300);
+
+
+// PACKAGE 7 — budgets, goals and cash forecast
+const planningMonthKey = "finporyadok.planning.month";
+function planningMonth(){ return localStorage.getItem(planningMonthKey) || new Date().toISOString().slice(0,7); }
+function monthBounds(ym){ const [y,m]=ym.split('-').map(Number); return [new Date(y,m-1,1), new Date(y,m,1)]; }
+function rowDateValue(row){ const d=new Date(row.date); return Number.isNaN(d.getTime())?null:d; }
+function rowsForPlanningMonth(){ const [a,b]=monthBounds(planningMonth()); return state.rows.filter(r=>{const d=rowDateValue(r);return d&&d>=a&&d<b;}); }
+function expenseValue(r){ return String(r.type||'').toLowerCase().includes('expense') || Number(r.amount)<0 ? Math.abs(Number(r.amount)||0) : 0; }
+function incomeValue(r){ return String(r.type||'').toLowerCase().includes('income') || Number(r.amount)>0 ? Math.max(0,Number(r.amount)||0) : 0; }
+function moneyText(v){ return `${Math.round(Number(v)||0).toLocaleString('ru-RU')} ₽`; }
+function renderPlanning(){
+  const root=byId('planning'); if(!root) return;
+  const month=planningMonth(); const input=byId('planningMonth'); if(input&&input.value!==month) input.value=month;
+  const rows=rowsForPlanningMonth(); const income=rows.reduce((a,r)=>a+incomeValue(r),0), expense=rows.reduce((a,r)=>a+expenseValue(r),0);
+  const planned=state.budgetPlans.filter(x=>x.month===month).reduce((a,x)=>a+Number(x.limit||0),0);
+  const regular=typeof regularOccurrences==='function'?regularOccurrences().filter(x=>String(x.date||'').startsWith(month)&&!x.paid).reduce((a,x)=>a+Number(x.amount||0),0):0;
+  const reserve=Number(state.forecastSettings.reserve||0); const forecast=income-expense-regular-reserve;
+  if(byId('planningIncome')) byId('planningIncome').textContent=moneyText(income);
+  if(byId('planningExpense')) byId('planningExpense').textContent=moneyText(expense);
+  if(byId('planningAvailable')) byId('planningAvailable').textContent=moneyText(forecast);
+  if(byId('planningAvailable')) byId('planningAvailable').className=forecast<0?'bad':'good';
+  if(byId('planningMeta')) byId('planningMeta').textContent=`Лимиты: ${moneyText(planned)} · ожидаемые платежи: ${moneyText(regular)} · резерв: ${moneyText(reserve)}`;
+  const byCat={}; rows.forEach(r=>{const v=expenseValue(r);if(v){const c=r.category||'Без категории';byCat[c]=(byCat[c]||0)+v;}});
+  const list=byId('budgetPlanList'); if(list){ const plans=state.budgetPlans.filter(x=>x.month===month); list.innerHTML=plans.length?plans.map(p=>{const spent=byCat[p.category]||0, pct=p.limit?Math.min(999,Math.round(spent/p.limit*100)):0; return `<article class="budget-plan-card" data-budget-id="${escapeHtml(p.id)}"><div><strong>${escapeHtml(p.category)}</strong><small>${moneyText(spent)} из ${moneyText(p.limit)}</small></div><div class="budget-progress"><i style="width:${Math.min(100,pct)}%"></i></div><span class="${pct>100?'bad':pct>80?'warn':'good'}">${pct}%</span><button data-budget-open="${escapeHtml(p.category)}" type="button">Операции</button><button data-budget-delete="${escapeHtml(p.id)}" type="button">×</button></article>`}).join(''):'<article class="empty-state"><strong>Лимиты не заданы</strong><p>Добавьте бюджет по категории на выбранный месяц.</p></article>'; }
+  const goals=byId('savingsGoalList'); if(goals){ goals.innerHTML=state.savingsGoals.length?state.savingsGoals.map(g=>{const current=Number(g.current||0), target=Number(g.target||0), pct=target?Math.min(100,Math.round(current/target*100)):0; return `<article class="goal-card"><div><strong>${escapeHtml(g.name)}</strong><small>${moneyText(current)} из ${moneyText(target)}${g.deadline?` · до ${escapeHtml(g.deadline)}`:''}</small></div><div class="budget-progress"><i style="width:${pct}%"></i></div><span>${pct}%</span><button data-goal-add="${escapeHtml(g.id)}" type="button">Пополнить</button><button data-goal-delete="${escapeHtml(g.id)}" type="button">×</button></article>`}).join(''):'<article class="empty-state"><strong>Целей пока нет</strong><p>Создайте резервный фонд или цель для крупной покупки.</p></article>'; }
+}
+byId('planningMonth')?.addEventListener('change',e=>{localStorage.setItem(planningMonthKey,e.target.value);renderPlanning();});
+byId('addBudgetPlanBtn')?.addEventListener('click',()=>byId('budgetPlanDialog')?.showModal());
+byId('budgetPlanForm')?.addEventListener('submit',e=>{e.preventDefault();const f=new FormData(e.target);state.budgetPlans.push({id:`budget-${Date.now()}`,month:planningMonth(),category:String(f.get('category')||'Без категории'),limit:Number(f.get('limit')||0),rollover:Boolean(f.get('rollover'))});saveState();e.target.reset();byId('budgetPlanDialog')?.close();renderPlanning();});
+byId('addSavingsGoalBtn')?.addEventListener('click',()=>byId('savingsGoalDialog')?.showModal());
+byId('savingsGoalForm')?.addEventListener('submit',e=>{e.preventDefault();const f=new FormData(e.target);state.savingsGoals.push({id:`goal-${Date.now()}`,name:String(f.get('name')||'Цель'),target:Number(f.get('target')||0),current:Number(f.get('current')||0),deadline:String(f.get('deadline')||''),account:String(f.get('account')||'')});saveState();e.target.reset();byId('savingsGoalDialog')?.close();renderPlanning();});
+byId('forecastReserve')?.addEventListener('change',e=>{state.forecastSettings.reserve=Number(e.target.value||0);saveState();renderPlanning();});
+document.addEventListener('click',e=>{const b=e.target.closest('[data-budget-delete]');if(b){state.budgetPlans=state.budgetPlans.filter(x=>x.id!==b.dataset.budgetDelete);saveState();renderPlanning();}const g=e.target.closest('[data-goal-delete]');if(g){state.savingsGoals=state.savingsGoals.filter(x=>x.id!==g.dataset.goalDelete);saveState();renderPlanning();}const a=e.target.closest('[data-goal-add]');if(a){const goal=state.savingsGoals.find(x=>x.id===a.dataset.goalAdd);if(goal){const v=Number(prompt('Сумма пополнения', '0')||0);if(v){goal.current=Number(goal.current||0)+v;saveState();renderPlanning();}}}const o=e.target.closest('[data-budget-open]');if(o&&typeof openDrilldown==='function')openDrilldown('category',o.dataset.budgetOpen);});
+renderPlanning();
