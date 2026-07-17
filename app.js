@@ -5394,3 +5394,63 @@ document.addEventListener('click', (event) => {
     setTimeout(() => pkg9OpenProductDetails(product), 50);
   }
 });
+
+
+// Package 10.4 — hard fix for opening the asset dialog.
+// The button calls this function directly from HTML, so opening does not depend
+// on delegated listeners or on the order in which the view was rendered.
+window.openAssetFormDirect = function openAssetFormDirect(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  const dialog = document.getElementById('assetDialog');
+  const form = document.getElementById('assetForm');
+  if (!dialog || !form) {
+    alert('Форма имущества не найдена. Обновите приложение до версии 0.17.4.');
+    return false;
+  }
+
+  // Open first. Even if filling a selector fails, the user still sees the form.
+  try {
+    if (!dialog.open) {
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else if (typeof dialog.show === 'function') dialog.show();
+      else dialog.setAttribute('open', '');
+    }
+  } catch (error) {
+    dialog.setAttribute('open', '');
+  }
+
+  try {
+    if (!Array.isArray(state.assets)) state.assets = [];
+    form.reset();
+    activeAssetId = null;
+
+    const title = document.getElementById('assetDialogTitle');
+    if (title) title.textContent = 'Добавить имущество';
+    const deleteButton = document.getElementById('deleteAssetBtn');
+    if (deleteButton) deleteButton.hidden = true;
+
+    // Fill selectors independently so one damaged collection cannot block the dialog.
+    try { populateAssetSelectors(); } catch (error) { console.error('Asset selectors:', error); }
+    try { renderAssetUtilityChecks(null); } catch (error) { console.error('Asset utilities:', error); }
+
+    const ownerField = form.elements.ownerMemberId;
+    if (ownerField) ownerField.value = assetMember()?.id || 'family-tatiana';
+    const typeField = form.elements.type;
+    if (typeField && !typeField.value) typeField.value = 'realEstate';
+    try { updateAssetLinkFields(); } catch (error) { console.error('Asset links:', error); }
+  } catch (error) {
+    console.error('Asset form initialization:', error);
+  }
+
+  return false;
+};
+
+// Also bind directly after the script loads for browsers that ignore inline handlers.
+const package104AddAssetButton = document.getElementById('addAssetBtn');
+if (package104AddAssetButton) {
+  package104AddAssetButton.onclick = window.openAssetFormDirect;
+}

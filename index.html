@@ -617,7 +617,7 @@
 
 
 <section class="view" id="assets">
-<div class="panel-head page-actions"><div><h2>Имущество, документы и гарантии</h2><p>Единая картотека недвижимости, автомобилей, техники и важных документов</p></div><button class="primary" id="addAssetBtn" type="button">+ Добавить имущество</button></div>
+<div class="panel-head page-actions"><div><h2>Имущество, документы и гарантии</h2><p>Единая картотека недвижимости, автомобилей, техники и важных документов</p></div><button class="primary" id="addAssetBtn" type="button" onclick="return window.openAssetFormDirect(event)">+ Добавить имущество</button></div>
 <div class="metric-grid four"><article class="metric"><span>Общая стоимость</span><strong id="assetTotalValue">0 ₽</strong></article><article class="metric"><span>Объектов</span><strong id="assetCount">0</strong></article><article class="metric"><span>На гарантии</span><strong id="assetWarrantyCount">0</strong></article><article class="metric"><span>Ближайшие сроки</span><strong id="assetDeadlineCount">0</strong></article></div>
 <section class="panel"><div class="filter-grid"><label>Тип<select id="assetTypeFilter"><option value="all">Все типы</option><option value="realEstate">Недвижимость</option><option value="vehicle">Автомобиль</option><option value="appliance">Техника</option><option value="valuable">Ценная покупка</option><option value="other">Прочее</option></select></label><label>Владелец<select id="assetOwnerFilter"><option value="all">Все владельцы</option></select></label><label>Поиск<input id="assetSearch" placeholder="Название, адрес, серийный номер"></label></div></section>
 <div class="asset-grid" id="assetCards"></div>
