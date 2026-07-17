@@ -3,6 +3,7 @@ const storeKey = "finporyadok.state.alzex.v1";
   try { localStorage.removeItem(legacyKey); } catch {}
 });
 const seedRows = window.ANDROMONEY_DATA?.rows || [];
+const CURRENT_SCHEMA_VERSION = 4;
 const savedState = loadState();
 
 const state = {
@@ -47,9 +48,59 @@ const views = {
   settings: ["Настройки", "Офлайн-режим, синхронизация и безопасность."]
 };
 
+
+function migrateStoredState(raw) {
+  const saved = raw && typeof raw === "object" ? structuredCloneSafe(raw) : {};
+  let version = Number(saved.schemaVersion || 1);
+  if (version < 2) {
+    saved.plannedPaymentStates = saved.plannedPaymentStates && typeof saved.plannedPaymentStates === "object" ? saved.plannedPaymentStates : {};
+    saved.officialSubsistenceByYear = saved.officialSubsistenceByYear && typeof saved.officialSubsistenceByYear === "object" ? saved.officialSubsistenceByYear : {};
+    version = 2;
+  }
+  if (version < 3) {
+    saved.shoppingAliases = saved.shoppingAliases && typeof saved.shoppingAliases === "object" ? saved.shoppingAliases : {};
+    (saved.insurancePolicies || []).forEach((policy) => {
+      if (policy.reminderDisabled == null) policy.reminderDisabled = false;
+    });
+    version = 3;
+  }
+  if (version < 4) {
+    (saved.rows || []).forEach((row, index) => {
+      if (!row.id) row.id = `row-migrated-${index}-${row.date || "date"}-${Math.round(Number(row.amount) || 0)}`;
+      if (row.receipt && !Array.isArray(row.receipt.items)) row.receipt.items = [];
+    });
+    (saved.regularPayments || []).forEach((payment) => {
+      if (payment.paymentType === "utilities" && payment.hasMeters == null) payment.hasMeters = Boolean(payment.meterReadingStartDate);
+    });
+    version = 4;
+  }
+  saved.schemaVersion = CURRENT_SCHEMA_VERSION;
+  return saved;
+}
+
+function structuredCloneSafe(value) {
+  try { return JSON.parse(JSON.stringify(value)); } catch { return {}; }
+}
+
+function createLocalSafetySnapshot(reason = "automatic") {
+  try {
+    const now = new Date();
+    const last = Number(localStorage.getItem(`${storeKey}.snapshotAt`) || 0);
+    if (reason === "automatic" && now.getTime() - last < 24 * 60 * 60 * 1000) return;
+    const current = localStorage.getItem(storeKey);
+    if (!current) return;
+    localStorage.setItem(`${storeKey}.snapshot.previous`, localStorage.getItem(`${storeKey}.snapshot.latest`) || "");
+    localStorage.setItem(`${storeKey}.snapshot.latest`, JSON.stringify({ createdAt: now.toISOString(), reason, payload: JSON.parse(current) }));
+    localStorage.setItem(`${storeKey}.snapshotAt`, String(now.getTime()));
+  } catch (error) {
+    console.warn("Safety snapshot failed", error);
+  }
+}
+
 function loadState() {
   try {
-    const saved = JSON.parse(localStorage.getItem(storeKey) || "null");
+    const raw = JSON.parse(localStorage.getItem(storeKey) || "null");
+    const saved = migrateStoredState(raw);
     return {
       rows: saved?.rows?.length ? saved.rows : seedRows,
       accounts: Array.isArray(saved?.accounts) ? saved.accounts : [],
@@ -70,9 +121,10 @@ function loadState() {
 }
 
 function saveState() {
+  createLocalSafetySnapshot("automatic");
   const savedAt = new Date().toISOString();
   localStorage.setItem(storeKey, JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
     savedAt,
     rows: state.rows,
     accounts: state.accounts,
@@ -4439,6 +4491,101 @@ window.onNativeReceiptTextRecognized=function(text){const items=parseReceiptText
 window.onNativeReceiptTextError=function(message){byId('paperReceiptStatus').textContent=message||'Не удалось распознать чек.';};
 byId('scanPaperReceiptBtn')?.addEventListener('click',()=>byId('paperReceiptInput')?.click());
 byId('paperReceiptInput')?.addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;byId('paperReceiptStatus').textContent='Распознаю позиции чека…';try{const data=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',').pop());r.onerror=rej;r.readAsDataURL(file);});if(window.AndroidReceiptOcr?.recognizeBase64){window.AndroidReceiptOcr.recognizeBase64(data);}else throw new Error('Распознавание доступно в Android-приложении.');}catch(err){byId('paperReceiptStatus').textContent=err.message||String(err);}});
+
+
+// ===== Package 4: diagnostics, data integrity and safe recovery =====
+function diagnoseDatabase() {
+  const issues = [];
+  const add = (severity, type, title, reason, ref = {}) => issues.push({ id:`diag-${issues.length+1}`, severity, type, title, reason, ...ref });
+  const accountNames = new Set(state.accounts.map(a => String(a.name || a.account || "").trim()).filter(Boolean));
+  const categoryNames = new Set(state.categories.map(c => String(c.name || c).trim()).filter(Boolean));
+  const rowIds = new Set();
+  const duplicateKeys = new Map();
+  state.rows.forEach((row, index) => {
+    if (!row.id) add("error","operation","Операция без идентификатора","Запись невозможно надёжно связать с чеком, платежом или восстановлением.",{index});
+    else if (rowIds.has(row.id)) add("error","operation","Повторяющийся ID операции",`Идентификатор ${row.id} используется более одного раза.`,{rowId:row.id});
+    else rowIds.add(row.id);
+    if (!row.date || Number.isNaN(new Date(`${row.date}T00:00:00`).getTime())) add("error","operation","Некорректная дата операции","Дата отсутствует или имеет неподдерживаемый формат.",{rowId:row.id,index});
+    if (!Number.isFinite(Number(row.amount))) add("error","operation","Некорректная сумма операции","Сумма не является числом.",{rowId:row.id,index});
+    if (!String(row.account || row.from || row.to || "").trim()) add("warning","operation","Не указан счёт","Операцию нужно привязать к счёту для корректного баланса.",{rowId:row.id,index});
+    if (!String(row.category || "").trim()) add("warning","operation","Не указана категория","Операция не попадёт в корректную аналитику по категориям.",{rowId:row.id,index});
+    if (row.account && accountNames.size && !accountNames.has(String(row.account).trim())) add("warning","operation","Счёт отсутствует в справочнике",`В операции указан счёт «${row.account}», которого нет в списке счетов.`,{rowId:row.id,index});
+    const key = [row.date, Number(row.amount).toFixed(2), String(row.description || row.payee || "").trim().toLowerCase(), String(row.account || "").trim().toLowerCase()].join("|");
+    if (duplicateKeys.has(key)) add("warning","duplicate","Возможный дубль операции",`Совпадают дата, сумма, описание и счёт с записью ${duplicateKeys.get(key)}.`,{rowId:row.id,index});
+    else duplicateKeys.set(key,row.id || `строка ${index+1}`);
+    if (row.receipt) {
+      if (!Array.isArray(row.receipt.items) || !row.receipt.items.length) add("warning","receipt","Чек без позиций","У операции есть данные чека, но список товаров пуст.",{rowId:row.id,index});
+      const itemTotal = (row.receipt.items || []).reduce((sum,item)=>sum+(Number(item.total)||Number(item.price||0)*Number(item.qty||1)),0);
+      const receiptTotal = Math.abs(Number(row.amount)||0);
+      if (itemTotal && Math.abs(itemTotal-receiptTotal)>1) add("warning","receipt","Сумма позиций не совпадает с чеком",`Позиции: ${money(itemTotal)}, операция: ${money(receiptTotal)}.`,{rowId:row.id,index});
+    }
+  });
+  Object.entries(state.plannedPaymentStates || {}).forEach(([occurrenceId, saved]) => {
+    if (saved.transactionId && !rowIds.has(saved.transactionId)) add("error","planned-payment","Потеряна связанная банковская операция",`Плановый платёж ${occurrenceId} ссылается на удалённую операцию.`,{occurrenceId});
+  });
+  state.financialProducts.forEach(product => {
+    (product.actualPayments || []).forEach(payment => {
+      if (payment.transactionId && !rowIds.has(payment.transactionId)) add("error","loan","Платёж по кредиту связан с отсутствующей операцией",`${product.name || "Кредит"}: ${payment.date || "без даты"}.`,{productId:product.id,paymentId:payment.id});
+    });
+    if (product.type === "loan" && Number(product.remainingBalance) < 0) add("error","loan","Отрицательный остаток кредита","Остаток долга не может быть отрицательным.",{productId:product.id});
+  });
+  state.insurancePolicies.forEach(policy => {
+    if (!policy.subjectName) add("warning","insurance","Не указан объект страховки","Без объекта нельзя корректно фильтровать историю стоимости.",{policyId:policy.id});
+    if (policy.startDate && policy.endDate && policy.endDate < policy.startDate) add("error","insurance","Окончание полиса раньше начала","Проверьте даты действия полиса.",{policyId:policy.id});
+  });
+  state.alimonyRules.forEach(rule => {
+    if (rule.effectiveFrom && rule.effectiveTo && rule.effectiveTo < rule.effectiveFrom) add("error","alimony","Окончание правила раньше начала","Период правила начисления задан некорректно.",{ruleId:rule.id});
+  });
+  return { generatedAt:new Date().toISOString(), schemaVersion:CURRENT_SCHEMA_VERSION, counts:{rows:state.rows.length,accounts:state.accounts.length,categories:state.categories.length,issues:issues.length}, issues };
+}
+
+function renderDiagnostics() {
+  const host = byId("diagnosticsResults");
+  if (!host) return;
+  const report = diagnoseDatabase();
+  byId("diagnosticsSummary").textContent = report.issues.length ? `Найдено: ${report.issues.length}` : "Ошибок не найдено";
+  const grouped = report.issues.reduce((acc,item)=>{(acc[item.severity] ||= []).push(item);return acc;},{});
+  host.innerHTML = report.issues.length ? ["error","warning"].flatMap(level => (grouped[level]||[]).map(item => `<article class="diagnostic-item diagnostic-${level}"><div><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.reason)}</p><small>${escapeHtml(item.type)}</small></div><span>${level==="error"?"Ошибка":"Проверить"}</span></article>`)).join("") : `<div class="empty-state">Целостность базы проверена. Критических проблем не найдено.</div>`;
+  byId("diagnosticsMeta").textContent = `Схема ${report.schemaVersion} • ${report.counts.rows} операций • ${new Date(report.generatedAt).toLocaleString("ru-RU")}`;
+}
+
+function repairSafeDatabaseIssues() {
+  createLocalSafetySnapshot("before-auto-repair");
+  let fixed = 0;
+  const seen = new Set();
+  state.rows.forEach((row,index)=>{
+    if (!row.id || seen.has(row.id)) { row.id = `row-repaired-${Date.now()}-${index}`; fixed++; }
+    seen.add(row.id);
+    if (row.receipt && !Array.isArray(row.receipt.items)) { row.receipt.items=[]; fixed++; }
+  });
+  Object.entries(state.plannedPaymentStates || {}).forEach(([key,value])=>{
+    if (value.transactionId && !seen.has(value.transactionId)) { value.transactionId=""; fixed++; }
+  });
+  state.financialProducts.forEach(product=>{
+    (product.actualPayments||[]).forEach(payment=>{ if(payment.transactionId&&!seen.has(payment.transactionId)){payment.transactionId="";fixed++;} });
+    if(product.type==="loan"&&Number(product.remainingBalance)<0){product.remainingBalance=0;fixed++;}
+  });
+  saveState(); render(); renderDiagnostics();
+  byId("diagnosticsMessage").textContent = fixed ? `Безопасно исправлено записей: ${fixed}. Перед исправлением создан локальный снимок.` : "Автоматически исправляемых проблем не найдено.";
+}
+
+function downloadDiagnosticsReport() {
+  const report = diagnoseDatabase();
+  downloadBlob(new Blob([JSON.stringify(report,null,2)],{type:"application/json;charset=utf-8"}),`finporyadok-diagnostics-${safeFileDate()}.json`);
+}
+
+byId("runDiagnosticsBtn")?.addEventListener("click", renderDiagnostics);
+byId("repairDiagnosticsBtn")?.addEventListener("click", repairSafeDatabaseIssues);
+byId("downloadDiagnosticsBtn")?.addEventListener("click", downloadDiagnosticsReport);
+byId("restoreLatestSnapshotBtn")?.addEventListener("click",()=>{
+  try {
+    const snapshot = JSON.parse(localStorage.getItem(`${storeKey}.snapshot.latest`) || "null");
+    if(!snapshot?.payload) throw new Error("Локальный снимок не найден.");
+    createLocalSafetySnapshot("before-snapshot-restore");
+    localStorage.setItem(storeKey,JSON.stringify(migrateStoredState(snapshot.payload)));
+    location.reload();
+  } catch(error) { byId("diagnosticsMessage").textContent=error.message||String(error); }
+});
 
 cleanupImportedPdfAccounts();
 initializeDashboardDateRange();

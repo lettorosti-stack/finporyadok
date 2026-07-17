@@ -623,6 +623,26 @@
   <span class="backup-note" id="backupMessage">Резервная копия ещё не создавалась в этой сессии.</span>
 </article>
 </div>
+
+<section class="panel diagnostics-panel">
+  <div class="panel-head">
+    <div>
+      <span class="eyebrow">Контроль целостности</span>
+      <h2>Диагностика базы</h2>
+      <p>Проверяет дубли, потерянные связи, некорректные даты и суммы, чеки и финансовые продукты.</p>
+    </div>
+    <strong id="diagnosticsSummary">Не запускалась</strong>
+  </div>
+  <div class="diagnostics-actions">
+    <button class="primary" id="runDiagnosticsBtn" type="button">Проверить базу</button>
+    <button class="ghost" id="downloadDiagnosticsBtn" type="button">Скачать отчёт</button>
+    <button class="ghost" id="repairDiagnosticsBtn" type="button">Исправить безопасно</button>
+    <button class="ghost danger-soft" id="restoreLatestSnapshotBtn" type="button">Вернуть локальный снимок</button>
+  </div>
+  <small id="diagnosticsMeta">Схема базы будет определена после проверки.</small>
+  <p class="backup-note" id="diagnosticsMessage">Автоматическое исправление не удаляет операции и перед началом создаёт локальный снимок.</p>
+  <div class="diagnostics-results" id="diagnosticsResults"></div>
+</section>
 </section>
 <footer class="app-footer">
 <span>Источник</span>
