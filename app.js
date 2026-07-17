@@ -3,7 +3,7 @@ const storeKey = "finporyadok.state.alzex.v1";
   try { localStorage.removeItem(legacyKey); } catch {}
 });
 const seedRows = window.ANDROMONEY_DATA?.rows || [];
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 5;
 const savedState = loadState();
 
 const state = {
@@ -19,6 +19,9 @@ const state = {
   shoppingAliases: savedState.shoppingAliases && typeof savedState.shoppingAliases === "object" ? savedState.shoppingAliases : {},
   officialSubsistenceData: savedState.officialSubsistenceData || null,
   officialSubsistenceByYear: savedState.officialSubsistenceByYear && typeof savedState.officialSubsistenceByYear === "object" ? savedState.officialSubsistenceByYear : {},
+  familyMembers: Array.isArray(savedState.familyMembers) ? savedState.familyMembers : [],
+  activeMemberId: savedState.activeMemberId || "family-tatiana",
+  familyActivityLog: Array.isArray(savedState.familyActivityLog) ? savedState.familyActivityLog : [],
   shopping: savedState.shopping.length ? savedState.shopping : [
     { name: "Молоко", qty: "2 л", days: 4, price: 92 },
     { name: "Корм", qty: "3 кг", days: 26, price: 1450 },
@@ -26,6 +29,7 @@ const state = {
   ]
 };
 ensureRowIds();
+initializeFamilyOwnership();
 
 const transactionPage = {
   limit: 40,
@@ -74,6 +78,18 @@ function migrateStoredState(raw) {
     });
     version = 4;
   }
+  if (version < 5) {
+    saved.familyMembers = Array.isArray(saved.familyMembers) && saved.familyMembers.length ? saved.familyMembers : [
+      { id: "family-tatiana", name: "Татьяна", role: "admin", color: "teal", pin: "", allowance: 0, canAddOperations: true, canSeeFamilyTotals: true, active: true },
+      { id: "family-veronika", name: "Вероника", role: "child", color: "violet", pin: "", allowance: 0, canAddOperations: true, canSeeFamilyTotals: false, active: true },
+      { id: "family-diana", name: "Диана", role: "child", color: "amber", pin: "", allowance: 0, canAddOperations: true, canSeeFamilyTotals: false, active: true }
+    ];
+    saved.activeMemberId = saved.activeMemberId || "family-tatiana";
+    saved.familyActivityLog = Array.isArray(saved.familyActivityLog) ? saved.familyActivityLog : [];
+    (saved.rows || []).forEach((row) => { if (!row.memberId) row.memberId = "family-tatiana"; });
+    (saved.accounts || []).forEach((account) => { if (account && typeof account === "object" && !account.ownerMemberId) account.ownerMemberId = "family-tatiana"; });
+    version = 5;
+  }
   saved.schemaVersion = CURRENT_SCHEMA_VERSION;
   return saved;
 }
@@ -114,10 +130,17 @@ function loadState() {
       plannedPaymentStates: saved?.plannedPaymentStates && typeof saved.plannedPaymentStates === "object" ? saved.plannedPaymentStates : {},
       shoppingAliases: saved?.shoppingAliases && typeof saved.shoppingAliases === "object" ? saved.shoppingAliases : {},
       officialSubsistenceData: saved?.officialSubsistenceData || null,
-      officialSubsistenceByYear: saved?.officialSubsistenceByYear && typeof saved.officialSubsistenceByYear === "object" ? saved.officialSubsistenceByYear : {}
+      officialSubsistenceByYear: saved?.officialSubsistenceByYear && typeof saved.officialSubsistenceByYear === "object" ? saved.officialSubsistenceByYear : {},
+      familyMembers: Array.isArray(saved?.familyMembers) && saved.familyMembers.length ? saved.familyMembers : [
+        { id: "family-tatiana", name: "Татьяна", role: "admin", color: "teal", pin: "", allowance: 0, canAddOperations: true, canSeeFamilyTotals: true, active: true },
+        { id: "family-veronika", name: "Вероника", role: "child", color: "violet", pin: "", allowance: 0, canAddOperations: true, canSeeFamilyTotals: false, active: true },
+        { id: "family-diana", name: "Диана", role: "child", color: "amber", pin: "", allowance: 0, canAddOperations: true, canSeeFamilyTotals: false, active: true }
+      ],
+      activeMemberId: saved?.activeMemberId || "family-tatiana",
+      familyActivityLog: Array.isArray(saved?.familyActivityLog) ? saved.familyActivityLog : []
     };
   } catch {}
-  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], shoppingAliases: {}, financialProducts: [], insurancePolicies: [], alimonyRules: [], regularPayments: [], plannedPaymentStates: {} };
+  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], shoppingAliases: {}, financialProducts: [], insurancePolicies: [], alimonyRules: [], regularPayments: [], plannedPaymentStates: {}, familyMembers: [], activeMemberId: "family-tatiana", familyActivityLog: [] };
 }
 
 function saveState() {
@@ -138,7 +161,10 @@ function saveState() {
     regularPayments: state.regularPayments,
     plannedPaymentStates: state.plannedPaymentStates,
     officialSubsistenceData: state.officialSubsistenceData,
-    officialSubsistenceByYear: state.officialSubsistenceByYear
+    officialSubsistenceByYear: state.officialSubsistenceByYear,
+    familyMembers: state.familyMembers,
+    activeMemberId: state.activeMemberId,
+    familyActivityLog: state.familyActivityLog
   }));
   localStorage.setItem(`${storeKey}.lastSavedAt`, savedAt);
   updateDatabaseStatus();
@@ -774,6 +800,8 @@ function render() {
   renderShopping();
   renderReports();
   renderImportArchive();
+  renderFamilyAccess();
+  applyFamilyPermissions();
 }
 
 
@@ -955,7 +983,9 @@ function filteredRows() {
   const category = byId("categoryFilter").value;
   const type = byId("typeFilter").value;
   const workExpense = byId("workExpenseFilter")?.value || "all";
+  const member = activeFamilyMember();
   return state.rows.filter((row) => {
+    if (member?.role === "child" && row.memberId !== member.id) return false;
     const hay = `${row.description} ${row.category} ${row.account} ${row.project} ${row.payee}`.toLowerCase();
     return (!query || hay.includes(query))
       && (account === "all" || row.account === account)
@@ -2133,6 +2163,11 @@ function showOperationDetails(id) {
 }
 
 function setView(id) {
+  const member = activeFamilyMember();
+  if (!familyCanAccessView(member, id)) {
+    alert("Этот раздел недоступен текущему профилю.");
+    id = "dashboard";
+  }
   document.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === id));
   document.querySelectorAll(".nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === id));
   byId("pageTitle").textContent = views[id]?.[0] || "ФинПорядок";
@@ -4598,6 +4633,83 @@ byId("nativeReceiptScanBtn")?.addEventListener("click", () => {
 });
 
 updateDatabaseStatus();
+
+
+// ===== Пакет 5: семейные профили и права доступа =====
+function activeFamilyMember() {
+  return state.familyMembers.find((member) => member.id === state.activeMemberId) || state.familyMembers[0] || null;
+}
+function familyCanAccessView(member, viewId) {
+  if (!member || member.role === "admin") return true;
+  return ["dashboard", "transactions", "accounts", "calendar", "shopping", "settings"].includes(viewId);
+}
+function initializeFamilyOwnership() {
+  if (!Array.isArray(state.familyMembers) || !state.familyMembers.length) return;
+  state.rows.forEach((row) => { if (!row.memberId) row.memberId = "family-tatiana"; });
+  const originalPush = state.rows.push.bind(state.rows);
+  state.rows.push = (...items) => originalPush(...items.map((item) => ({ ...item, memberId: item.memberId || state.activeMemberId || "family-tatiana", createdByMemberId: item.createdByMemberId || state.activeMemberId || "family-tatiana" })));
+  const originalUnshift = state.rows.unshift.bind(state.rows);
+  state.rows.unshift = (...items) => originalUnshift(...items.map((item) => ({ ...item, memberId: item.memberId || state.activeMemberId || "family-tatiana", createdByMemberId: item.createdByMemberId || state.activeMemberId || "family-tatiana" })));
+}
+function addFamilyLog(action, details = "") {
+  const member = activeFamilyMember();
+  state.familyActivityLog.unshift({ id: `family-log-${Date.now()}-${Math.random().toString(16).slice(2)}`, at: new Date().toISOString(), memberId: member?.id || "", memberName: member?.name || "Система", action, details });
+  state.familyActivityLog = state.familyActivityLog.slice(0, 300);
+}
+function familyRoleLabel(role) { return role === "admin" ? "Администратор" : "Детский профиль"; }
+function renderFamilyAccess() {
+  const member = activeFamilyMember();
+  const top = byId("activeFamilyProfileBtn");
+  if (top && member) top.innerHTML = `<span class="family-avatar family-avatar--${escapeHtml(member.color || "teal")}">${escapeHtml((member.name || "?").slice(0,1).toUpperCase())}</span><span>${escapeHtml(member.name)}</span>`;
+  const list = byId("familyMembersList");
+  if (list) list.innerHTML = state.familyMembers.map((item) => `<article class="family-member-card ${item.id === state.activeMemberId ? "is-active" : ""}"><div class="family-member-main"><span class="family-avatar family-avatar--${escapeHtml(item.color || "teal")}">${escapeHtml((item.name || "?").slice(0,1).toUpperCase())}</span><div><strong>${escapeHtml(item.name)}</strong><small>${familyRoleLabel(item.role)}${item.allowance ? ` • карманные ${money(item.allowance)}` : ""}</small></div></div><div class="family-member-actions"><button class="ghost switch-family-member" data-member-id="${escapeHtml(item.id)}" type="button">Войти</button>${member?.role === "admin" ? `<button class="icon-action edit-family-member" data-member-id="${escapeHtml(item.id)}" title="Редактировать" type="button">✏️</button>` : ""}</div></article>`).join("");
+  const add = byId("addFamilyMemberBtn"); if (add) add.hidden = member?.role !== "admin";
+  const log = byId("familyActivityLog");
+  if (log) log.innerHTML = state.familyActivityLog.length ? state.familyActivityLog.slice(0,30).map((entry) => `<div class="family-log-row"><span>${new Date(entry.at).toLocaleString("ru-RU")}</span><strong>${escapeHtml(entry.memberName)}</strong><p>${escapeHtml(entry.action)}${entry.details ? ` — ${escapeHtml(entry.details)}` : ""}</p></div>`).join("") : `<div class="empty-state"><strong>Журнал пока пуст</strong><p>Здесь появятся входы в профили и изменения настроек доступа.</p></div>`;
+  renderFamilySwitcherList();
+  const current = byId("currentFamilyAccessSummary");
+  if (current && member) current.textContent = member.role === "admin" ? "Полный доступ ко всем разделам и данным семьи" : `Личный режим: видны собственные операции и разрешённые разделы`;
+}
+function applyFamilyPermissions() {
+  const member = activeFamilyMember();
+  document.body.dataset.familyRole = member?.role || "admin";
+  document.querySelectorAll("[data-view]").forEach((button) => { button.hidden = !familyCanAccessView(member, button.dataset.view); });
+  const addTx = byId("addTxBtn"); if (addTx) addTx.hidden = member?.role === "child" && member.canAddOperations === false;
+  document.querySelectorAll("#settings .backup-hero, #settings .backup-grid, #settings .diagnostics-panel").forEach((node) => { node.hidden = member?.role === "child"; });
+}
+function openFamilyMemberDialog(member = null) {
+  if (activeFamilyMember()?.role !== "admin") return;
+  const form = byId("familyMemberForm"); form.reset();
+  form.elements.memberId.value = member?.id || "";
+  form.elements.name.value = member?.name || "";
+  form.elements.role.value = member?.role || "child";
+  form.elements.pin.value = member?.pin || "";
+  form.elements.allowance.value = Number(member?.allowance || 0);
+  form.elements.color.value = member?.color || "teal";
+  form.elements.canAddOperations.checked = member?.canAddOperations !== false;
+  form.elements.canSeeFamilyTotals.checked = member?.canSeeFamilyTotals === true;
+  byId("familyMemberDialogTitle").textContent = member ? "Редактирование профиля" : "Новый член семьи";
+  byId("deleteFamilyMemberBtn").hidden = !member || member.role === "admin";
+  byId("familyMemberDialog").showModal();
+}
+function switchFamilyMember(memberId) {
+  const target = state.familyMembers.find((item) => item.id === memberId); if (!target) return;
+  if (target.pin) { const entered = prompt(`Введите PIN профиля «${target.name}»`); if (entered === null) return; if (entered !== target.pin) { alert("Неверный PIN"); return; } }
+  state.activeMemberId = target.id;
+  addFamilyLog("Вход в профиль");
+  saveState(); render(); setView("dashboard");
+}
+byId("activeFamilyProfileBtn")?.addEventListener("click", () => byId("familySwitcherDialog")?.showModal());
+byId("addFamilyMemberBtn")?.addEventListener("click", () => openFamilyMemberDialog());
+byId("familyMembersList")?.addEventListener("click", (event) => { const sw = event.target.closest(".switch-family-member"); if (sw) { switchFamilyMember(sw.dataset.memberId); return; } const edit = event.target.closest(".edit-family-member"); if (edit) openFamilyMemberDialog(state.familyMembers.find((item) => item.id === edit.dataset.memberId)); });
+byId("familySwitcherList")?.addEventListener("click", (event) => { const button = event.target.closest("[data-family-switch-id]"); if (!button) return; byId("familySwitcherDialog").close(); switchFamilyMember(button.dataset.familySwitchId); });
+byId("familyMemberForm")?.addEventListener("submit", (event) => { event.preventDefault(); const form = event.currentTarget, d = Object.fromEntries(new FormData(form).entries()); const existing = state.familyMembers.find((item) => item.id === d.memberId); const obj = { id: existing?.id || `family-${Date.now()}`, name: d.name.trim(), role: d.role, pin: d.pin.trim(), allowance: Number(d.allowance)||0, color: d.color || "teal", canAddOperations: form.elements.canAddOperations.checked, canSeeFamilyTotals: form.elements.canSeeFamilyTotals.checked, active: true }; const index = state.familyMembers.findIndex((item) => item.id === obj.id); if (index >= 0) state.familyMembers[index] = obj; else state.familyMembers.push(obj); addFamilyLog(existing ? "Изменён профиль" : "Добавлен профиль", obj.name); saveState(); byId("familyMemberDialog").close(); render(); });
+byId("deleteFamilyMemberBtn")?.addEventListener("click", () => { const id = byId("familyMemberForm").elements.memberId.value; const member = state.familyMembers.find((item) => item.id === id); if (!member || member.role === "admin") return; if (!confirm(`Удалить профиль «${member.name}»? Его операции останутся в базе и будут переданы администратору.`)) return; state.rows.forEach((row) => { if (row.memberId === id) row.memberId = "family-tatiana"; }); state.familyMembers = state.familyMembers.filter((item) => item.id !== id); addFamilyLog("Удалён профиль", member.name); saveState(); byId("familyMemberDialog").close(); render(); });
+const originalRenderFamilyAccess = renderFamilyAccess;
+const oldRenderFamilySwitcher = renderFamilyAccess;
+function renderFamilySwitcherList() { const target = byId("familySwitcherList"); if (target) target.innerHTML = state.familyMembers.map((item) => `<button class="family-switch-row ${item.id===state.activeMemberId?'is-active':''}" data-family-switch-id="${escapeHtml(item.id)}" type="button"><span class="family-avatar family-avatar--${escapeHtml(item.color || 'teal')}">${escapeHtml((item.name||'?').slice(0,1).toUpperCase())}</span><span><strong>${escapeHtml(item.name)}</strong><small>${familyRoleLabel(item.role)}</small></span></button>`).join(""); }
+const familyRenderObserver = new MutationObserver(() => {});
+
 window.addEventListener("beforeunload", saveState);
 
 byId("refreshMoscowPmBtn")?.addEventListener("click", () => requestMoscowChildMinimum({ force: true }));

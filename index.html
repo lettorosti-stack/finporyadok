@@ -55,7 +55,7 @@
 </div>
 <div class="top-actions">
 <input id="searchInput" placeholder="Найти операцию, магазин, проект или счёт" type="search"/>
-<button class="ghost" id="exportBtn">Экспорт</button>
+<button class="family-profile-button" id="activeFamilyProfileBtn" type="button"><span class="family-avatar family-avatar--teal">Т</span><span>Татьяна</span></button><button class="ghost" id="exportBtn">Экспорт</button>
 <button class="primary" id="addTxBtn">+ Операция</button>
 </div>
 </header>
@@ -624,6 +624,16 @@
 </article>
 </div>
 
+
+<section class="panel family-access-panel">
+  <div class="panel-head">
+    <div><span class="eyebrow">Семейный доступ</span><h2>Профили семьи</h2><p id="currentFamilyAccessSummary">Полный доступ ко всем разделам и данным семьи</p></div>
+    <button class="primary" id="addFamilyMemberBtn" type="button">+ Добавить профиль</button>
+  </div>
+  <div class="family-members-list" id="familyMembersList"></div>
+  <details class="family-log-details"><summary>Журнал входов и изменений</summary><div class="family-activity-log" id="familyActivityLog"></div></details>
+</section>
+
 <section class="panel diagnostics-panel">
   <div class="panel-head">
     <div>
@@ -1074,6 +1084,24 @@
 <menu><button data-close="" type="button">Отмена</button><button class="primary">Сохранить</button></menu>
 </form>
 </dialog>
+
+<dialog class="family-switcher-dialog" id="familySwitcherDialog">
+<header><div><h2>Кто пользуется приложением?</h2><p>Выберите профиль. Для защищённого профиля потребуется PIN.</p></div><button data-close type="button">×</button></header>
+<div class="family-switcher-list" id="familySwitcherList"></div>
+</dialog>
+<dialog class="family-member-dialog" id="familyMemberDialog">
+<form id="familyMemberForm">
+<header><div><h2 id="familyMemberDialogTitle">Профиль семьи</h2><p>Настройте роль, PIN и доступ к операциям.</p></div><button data-close type="button">×</button></header>
+<input type="hidden" name="memberId"/>
+<div class="form-grid two"><label>Имя<input name="name" required/></label><label>Роль<select name="role"><option value="child">Детский профиль</option><option value="admin">Администратор</option></select></label></div>
+<div class="form-grid two"><label>PIN (необязательно)<input name="pin" inputmode="numeric" maxlength="8" pattern="[0-9]*" placeholder="4–8 цифр"/></label><label>Карманные деньги в месяц<input name="allowance" min="0" step="1" type="number" value="0"/></label></div>
+<label>Цвет профиля<select name="color"><option value="teal">Бирюзовый</option><option value="violet">Фиолетовый</option><option value="amber">Янтарный</option><option value="rose">Розовый</option><option value="blue">Синий</option></select></label>
+<label class="work-expense-checkbox"><input name="canAddOperations" type="checkbox" checked/><span><strong>Может добавлять операции</strong><small>Профиль сможет создавать собственные доходы и расходы.</small></span></label>
+<label class="work-expense-checkbox"><input name="canSeeFamilyTotals" type="checkbox"/><span><strong>Показывать общие суммы семьи</strong><small>Для детских профилей по умолчанию отключено.</small></span></label>
+<menu><button class="ghost danger-soft" id="deleteFamilyMemberBtn" type="button">Удалить профиль</button><button data-close type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></menu>
+</form>
+</dialog>
+
 <script src="./andromoney-data.js"></script>
 <script src="./app.js"></script>
 </body>
