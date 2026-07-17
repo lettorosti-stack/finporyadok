@@ -624,12 +624,13 @@
     <div class="form-grid two"><label>Тип<select name="type" required><option value="realEstate">Недвижимость</option><option value="vehicle">Автомобиль</option><option value="appliance">Техника</option><option value="valuable">Ценная покупка</option><option value="other">Прочее</option></select></label><label>Владелец<select name="ownerMemberId" id="assetInlineOwnerSelect"></select></label></div>
     <label>Название<input name="name" required placeholder="Квартира, автомобиль, холодильник"></label>
     <div class="form-grid two"><label>Дата покупки<input name="purchaseDate" type="date"></label><label>Стоимость покупки, ₽<input name="purchasePrice" type="number" min="0" step="1"></label></div>
-    <div class="form-grid two"><label>Текущая стоимость, ₽<input name="currentValue" type="number" min="0" step="1"></label><label>Место / адрес<input name="location"></label></div>
-    <div class="form-grid two"><label>Серийный номер / VIN<input name="serialNumber"></label><label>Гарантия до<input name="warrantyEndDate" type="date"></label></div>
-    <div class="form-grid two"><label>Следующее обслуживание<input name="serviceDate" type="date"></label><label>Налог / обязательный платёж до<input name="taxDate" type="date"></label></div>
+    <div class="form-grid two"><label>Текущая стоимость, ₽<input name="currentValue" type="number" min="0" step="1"></label><label id="assetInlineLocationField">Место / адрес<input name="location"></label></div>
+    <div class="form-grid two" id="assetInlineSerialWarrantyRow"><label id="assetInlineSerialField">Серийный номер / VIN<input name="serialNumber"></label><label id="assetInlineWarrantyDateField">Гарантия до<input name="warrantyEndDate" type="date"></label></div>
+    <div class="form-grid three" id="assetInlineVehicleWarrantyFields" hidden><label>Гарантия, лет<input name="vehicleWarrantyYears" type="number" min="0" step="0.5" placeholder="3"></label><label>Гарантия, км<input name="vehicleWarrantyKm" type="number" min="0" step="1000" placeholder="100000"></label><label>Текущий пробег, км<input name="currentMileage" type="number" min="0" step="1"></label><small>Гарантия заканчивается по первому наступившему условию: сроку или пробегу.</small></div>
+    <div class="form-grid two"><label id="assetInlineServiceField">Следующее обслуживание<input name="serviceDate" type="date"></label><label>Налог / обязательный платёж до<input name="taxDate" type="date"></label></div>
     <label>Связанная страховка<select name="insurancePolicyId" id="assetInlineInsuranceSelect"><option value="">Не связана</option></select></label>
     <label id="assetInlineLoanSection">Связанный кредит<select name="loanProductId" id="assetInlineLoanSelect"><option value="">Не связан</option></select><small>Для недвижимости — ипотека, для автомобиля — автокредит.</small></label>
-    <section id="assetInlineUtilitySection"><h4>Расходы по ЖКХ</h4><div class="asset-link-checks" id="assetInlineUtilityChecks"></div></section>
+    <section id="assetInlineUtilitySection"><h4>Расходы и сервисы дома</h4><div class="asset-link-checks" id="assetInlineUtilityChecks"></div></section>
     <label>Заметки<textarea name="notes" rows="3"></textarea></label>
     <div class="button-row"><button class="primary" type="submit">Сохранить имущество</button><button class="ghost" type="reset">Очистить</button></div>
     <p class="form-status" id="assetInlineStatus" aria-live="polite"></p>
@@ -1244,7 +1245,7 @@
 </dialog>
 
 
-<dialog class="asset-dialog" id="assetDialog"><form id="assetForm"><header><div><h2 id="assetDialogTitle">Имущество</h2><p>Карточка объекта, сроки и связанная страховка</p></div><button data-close type="button">×</button></header><input type="hidden" name="assetId"><div class="form-grid two"><label>Тип<select name="type" required><option value="realEstate">Недвижимость</option><option value="vehicle">Автомобиль</option><option value="appliance">Техника</option><option value="valuable">Ценная покупка</option><option value="other">Прочее</option></select></label><label>Владелец<select name="ownerMemberId" id="assetOwnerSelect"></select></label></div><label>Название<input name="name" required placeholder="Квартира, автомобиль, холодильник"></label><div class="form-grid two"><label>Дата покупки<input name="purchaseDate" type="date"></label><label>Стоимость покупки, ₽<input name="purchasePrice" type="number" min="0" step="1"></label></div><div class="form-grid two"><label>Текущая стоимость, ₽<input name="currentValue" type="number" min="0" step="1"></label><label>Место / адрес<input name="location"></label></div><div class="form-grid two"><label>Серийный номер / VIN<input name="serialNumber"></label><label>Гарантия до<input name="warrantyEndDate" type="date"></label></div><div class="form-grid two"><label>Следующее обслуживание<input name="serviceDate" type="date"></label><label>Налог / обязательный платёж до<input name="taxDate" type="date"></label></div><label>Связанная страховка<select name="insurancePolicyId" id="assetInsuranceSelect"><option value="">Не связана</option></select></label><section class="asset-link-section" id="assetUtilityLinkSection" hidden><div class="panel-head"><div><h3>Расходы по ЖКХ</h3><p>Отметьте коммунальные платежи, относящиеся к этой недвижимости.</p></div></div><div class="asset-link-checks" id="assetUtilityPaymentChecks"></div></section><label class="asset-loan-link" id="assetLoanLinkSection" hidden>Связанный кредит<select name="loanProductId" id="assetLoanSelect"><option value="">Не связан</option></select><small id="assetLoanHint">Для недвижимости можно привязать ипотеку, для автомобиля — автокредит.</small></label><label>Заметки<textarea name="notes" rows="3"></textarea></label><menu><button class="ghost danger-soft" id="deleteAssetBtn" type="button">Удалить</button><button data-close type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></menu></form></dialog>
+<dialog class="asset-dialog" id="assetDialog"><form id="assetForm"><header><div><h2 id="assetDialogTitle">Имущество</h2><p>Карточка объекта, сроки и связанная страховка</p></div><button data-close type="button">×</button></header><input type="hidden" name="assetId"><div class="form-grid two"><label>Тип<select name="type" required><option value="realEstate">Недвижимость</option><option value="vehicle">Автомобиль</option><option value="appliance">Техника</option><option value="valuable">Ценная покупка</option><option value="other">Прочее</option></select></label><label>Владелец<select name="ownerMemberId" id="assetOwnerSelect"></select></label></div><label>Название<input name="name" required placeholder="Квартира, автомобиль, холодильник"></label><div class="form-grid two"><label>Дата покупки<input name="purchaseDate" type="date"></label><label>Стоимость покупки, ₽<input name="purchasePrice" type="number" min="0" step="1"></label></div><div class="form-grid two"><label>Текущая стоимость, ₽<input name="currentValue" type="number" min="0" step="1"></label><label id="assetDialogLocationField">Место / адрес<input name="location"></label></div><div class="form-grid two" id="assetDialogSerialWarrantyRow"><label id="assetDialogSerialField">Серийный номер / VIN<input name="serialNumber"></label><label id="assetDialogWarrantyDateField">Гарантия до<input name="warrantyEndDate" type="date"></label></div><div class="form-grid three" id="assetDialogVehicleWarrantyFields" hidden><label>Гарантия, лет<input name="vehicleWarrantyYears" type="number" min="0" step="0.5"></label><label>Гарантия, км<input name="vehicleWarrantyKm" type="number" min="0" step="1000"></label><label>Текущий пробег, км<input name="currentMileage" type="number" min="0" step="1"></label><small>Гарантия заканчивается по первому наступившему условию: сроку или пробегу.</small></div><div class="form-grid two"><label id="assetDialogServiceField">Следующее обслуживание<input name="serviceDate" type="date"></label><label>Налог / обязательный платёж до<input name="taxDate" type="date"></label></div><label>Связанная страховка<select name="insurancePolicyId" id="assetInsuranceSelect"><option value="">Не связана</option></select></label><section class="asset-link-section" id="assetUtilityLinkSection" hidden><div class="panel-head"><div><h3>Расходы и сервисы дома</h3><p>Отметьте ЖКХ, интернет, телевидение и подписки, относящиеся к этой недвижимости.</p></div></div><div class="asset-link-checks" id="assetUtilityPaymentChecks"></div></section><label class="asset-loan-link" id="assetLoanLinkSection" hidden>Связанный кредит<select name="loanProductId" id="assetLoanSelect"><option value="">Не связан</option></select><small id="assetLoanHint">Для недвижимости можно привязать ипотеку, для автомобиля — автокредит.</small></label><label>Заметки<textarea name="notes" rows="3"></textarea></label><menu><button class="ghost danger-soft" id="deleteAssetBtn" type="button">Удалить</button><button data-close type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></menu></form></dialog>
 <dialog class="asset-details-dialog" id="assetDetailsDialog"><header><div><h2 id="assetDetailsTitle">Имущество</h2><p id="assetDetailsSubtitle">Карточка объекта</p></div><button data-close type="button">×</button></header><div id="assetDetailsBody"></div><menu><button class="ghost" id="editAssetFromDetailsBtn" type="button">Изменить</button><button data-close type="button">Закрыть</button></menu></dialog>
 <dialog class="asset-document-dialog" id="assetDocumentDialog"><form id="assetDocumentForm"><header><div><h2>Документ имущества</h2><p>Чек, гарантийный талон, ПТС, договор или иной файл</p></div><button data-close type="button">×</button></header><input type="hidden" name="assetId"><label>Название<input name="name" required></label><div class="form-grid two"><label>Тип<select name="type"><option value="receipt">Чек</option><option value="warranty">Гарантия</option><option value="ownership">Право собственности</option><option value="service">Обслуживание</option><option value="tax">Налог</option><option value="other">Прочее</option></select></label><label>Действует до<input name="expiryDate" type="date"></label></div><label>Файл<input name="file" type="file" accept="image/*,.pdf,.doc,.docx"></label><small>Файлы до 4 МБ сохраняются внутри резервной копии приложения.</small><menu><button data-close type="button">Отмена</button><button class="primary" type="submit">Добавить</button></menu></form></dialog>
 
@@ -1343,8 +1344,33 @@
     var loans = document.getElementById('assetInlineLoanSelect');
     if (loans) loans.innerHTML = '<option value="">Не связан</option>' + (Array.isArray(st.financialProducts) ? st.financialProducts : []).filter(function (p) { return p.type === 'loan'; }).map(function (p) { return '<option value="'+esc(p.id)+'">'+esc(p.name || 'Кредит')+'</option>'; }).join('');
     var utilityBox = document.getElementById('assetInlineUtilityChecks');
-    var utilities = (Array.isArray(st.regularPayments) ? st.regularPayments : []).filter(function (p) { return p.paymentType === 'utilities'; });
-    if (utilityBox) utilityBox.innerHTML = utilities.length ? utilities.map(function (p) { return '<label class="asset-link-check"><input type="checkbox" name="utilityPaymentIds" value="'+esc(p.id)+'"><span><strong>'+esc(p.name)+'</strong><small>'+esc(p.frequency || 'регулярно')+'</small></span></label>'; }).join('') : '<p class="muted">Коммунальные платежи ещё не созданы.</p>';
+    var payments = Array.isArray(st.regularPayments) ? st.regularPayments.slice() : [];
+    // В WebView форма может открыться раньше, чем глобальный state обновится после
+    // сохранения платежа. В таком случае перечитываем актуальную базу напрямую.
+    try {
+      var stored = JSON.parse(localStorage.getItem('finporyadok.state.alzex.v1') || '{}');
+      if (stored && Array.isArray(stored.regularPayments)) {
+        var known = {};
+        payments.forEach(function (p) { if (p && p.id) known[p.id] = true; });
+        stored.regularPayments.forEach(function (p) { if (p && (!p.id || !known[p.id])) payments.push(p); });
+      }
+    } catch (ignore) {}
+    function isUtility(p) {
+      if (!p) return false;
+      var type = String(p.paymentType || p.type || '').trim().toLowerCase();
+      if (['utilities','utility','communal','communal-payment','housing','subscription','subscriptions'].indexOf(type) >= 0) return true;
+      var text = [p.name,p.category,p.payee,p.project,p.description].filter(Boolean).join(' ').toLowerCase();
+      return /(коммун|жкх|квартплат|электр|водоснаб|водоотвед|газ|отоплен|теплоснаб|содержание жилья|капремонт|вывоз мусор|интернет|wi[- ]?fi|вай[- ]?фай|телевид|тв\b|онлайн[- ]?кинотеатр|кинопоиск|иви|okko|wink|start|premier|яндекс(?: плюс)?|подписк|стриминг)/i.test(text);
+    }
+    var seenUtilities = {};
+    var utilities = payments.filter(function (p) {
+      if (!isUtility(p)) return false;
+      var key = p.id || [p.name,p.amount,p.startDate].join('|');
+      if (seenUtilities[key]) return false;
+      seenUtilities[key] = true;
+      return true;
+    });
+    if (utilityBox) utilityBox.innerHTML = utilities.length ? utilities.map(function (p) { return '<label class="asset-link-check"><input type="checkbox" name="utilityPaymentIds" value="'+esc(p.id)+'"><span><strong>'+esc(p.name || 'Платёж или подписка')+'</strong><small>'+esc(p.frequency || 'регулярно')+'</small></span></label>'; }).join('') : '<p class="muted">Платежи и подписки не найдены. Создайте ЖКХ, интернет или подписку, затем вернитесь к недвижимости.</p>';
     updateInlineType();
   }
   function updateInlineType() {
@@ -1353,8 +1379,30 @@
     var type = form.elements.type.value;
     var loan = document.getElementById('assetInlineLoanSection');
     var utility = document.getElementById('assetInlineUtilitySection');
+    var locationField = document.getElementById('assetInlineLocationField');
+    var serialField = document.getElementById('assetInlineSerialField');
+    var warrantyDateField = document.getElementById('assetInlineWarrantyDateField');
+    var vehicleWarrantyFields = document.getElementById('assetInlineVehicleWarrantyFields');
+    var serviceField = document.getElementById('assetInlineServiceField');
     if (loan) loan.hidden = !(type === 'realEstate' || type === 'vehicle');
     if (utility) utility.hidden = type !== 'realEstate';
+    if (locationField) locationField.hidden = (type === 'vehicle' || type === 'appliance');
+    if (serialField) serialField.hidden = (type === 'realEstate' || type === 'appliance');
+    if (warrantyDateField) warrantyDateField.hidden = (type === 'realEstate' || type === 'vehicle');
+    if (vehicleWarrantyFields) vehicleWarrantyFields.hidden = type !== 'vehicle';
+    if (serviceField) serviceField.hidden = type === 'realEstate';
+    if (type === 'realEstate') {
+      form.elements.serialNumber.value = '';
+      form.elements.warrantyEndDate.value = '';
+      form.elements.serviceDate.value = '';
+    }
+    if (type === 'vehicle') { form.elements.location.value = ''; form.elements.warrantyEndDate.value = ''; }
+    if (type === 'appliance') { form.elements.location.value = ''; form.elements.serialNumber.value = ''; }
+    if (type !== 'vehicle') {
+      form.elements.vehicleWarrantyYears.value = '';
+      form.elements.vehicleWarrantyKm.value = '';
+      form.elements.currentMileage.value = '';
+    }
   }
   document.addEventListener('DOMContentLoaded', fillInlineAssetLists);
   document.addEventListener('click', function (event) {
@@ -1385,10 +1433,13 @@
         purchaseDate: String(data.get('purchaseDate') || ''),
         purchasePrice: Number(data.get('purchasePrice')) || 0,
         currentValue: Number(data.get('currentValue')) || 0,
-        location: String(data.get('location') || ''),
-        serialNumber: String(data.get('serialNumber') || ''),
-        warrantyEndDate: String(data.get('warrantyEndDate') || ''),
-        serviceDate: String(data.get('serviceDate') || ''),
+        location: (type === 'vehicle' || type === 'appliance') ? '' : String(data.get('location') || ''),
+        serialNumber: (type === 'realEstate' || type === 'appliance') ? '' : String(data.get('serialNumber') || ''),
+        warrantyEndDate: (type === 'realEstate' || type === 'vehicle') ? '' : String(data.get('warrantyEndDate') || ''),
+        vehicleWarrantyYears: type === 'vehicle' ? (Number(data.get('vehicleWarrantyYears')) || 0) : 0,
+        vehicleWarrantyKm: type === 'vehicle' ? (Number(data.get('vehicleWarrantyKm')) || 0) : 0,
+        currentMileage: type === 'vehicle' ? (Number(data.get('currentMileage')) || 0) : 0,
+        serviceDate: type === 'realEstate' ? '' : String(data.get('serviceDate') || ''),
         taxDate: String(data.get('taxDate') || ''),
         insurancePolicyId: String(data.get('insurancePolicyId') || ''),
         loanProductId: (type === 'realEstate' || type === 'vehicle') ? String(data.get('loanProductId') || '') : '',

@@ -5168,8 +5168,28 @@ function assetVisibleItems(){ const m=assetMember(); return state.assets.filter(
 function assetTypeLabel(type){ return ({realEstate:'Недвижимость',vehicle:'Автомобиль',appliance:'Техника',valuable:'Ценная покупка',other:'Прочее'})[type]||'Имущество'; }
 function assetOwnerName(id){ return state.familyMembers.find(x=>x.id===id)?.name||'Татьяна'; }
 function assetDaysUntil(date){ if(!date)return null; const a=new Date(`${date}T00:00:00`),b=new Date();b.setHours(0,0,0,0);return Math.round((a-b)/86400000); }
+function assetVehicleWarrantyEndDate(asset){
+  const years=Number(asset?.vehicleWarrantyYears||0);
+  if(asset?.type!=='vehicle'||!years||!asset.purchaseDate)return '';
+  const date=new Date(`${asset.purchaseDate}T12:00:00`);
+  if(Number.isNaN(date.getTime()))return '';
+  const whole=Math.floor(years), months=Math.round((years-whole)*12);
+  date.setFullYear(date.getFullYear()+whole);
+  date.setMonth(date.getMonth()+months);
+  return date.toISOString().slice(0,10);
+}
+function assetVehicleWarrantyStatus(asset){
+  if(asset?.type!=='vehicle')return '';
+  const years=Number(asset.vehicleWarrantyYears||0), limit=Number(asset.vehicleWarrantyKm||0), current=Number(asset.currentMileage||0);
+  const parts=[];
+  if(years)parts.push(`${years} ${years===1?'год':'года/лет'}`);
+  if(limit)parts.push(`${Math.round(limit).toLocaleString('ru-RU')} км`);
+  if(!parts.length)return '';
+  const mileageText=limit?` • пробег ${Math.round(current).toLocaleString('ru-RU')} из ${Math.round(limit).toLocaleString('ru-RU')} км`:'';
+  return `${parts.join(' или ')}${mileageText}`;
+}
 function assetDeadlineItems(asset){ return [
-  ['Гарантия',asset.warrantyEndDate],['Обслуживание',asset.serviceDate],['Налог',asset.taxDate],
+  ['Гарантия',asset.type==='vehicle'?assetVehicleWarrantyEndDate(asset):asset.warrantyEndDate],['Обслуживание',asset.serviceDate],['Налог',asset.taxDate],
   ...(Array.isArray(asset.documents)?asset.documents.filter(d=>d.expiryDate).map(d=>[`Документ: ${d.name}`,d.expiryDate]):[])
 ].filter(x=>x[1]).map(([label,date])=>({label,date,days:assetDaysUntil(date)})); }
 function assetUpcomingDeadlines(days=30){ return assetVisibleItems().flatMap(a=>assetDeadlineItems(a).filter(x=>x.days!==null&&x.days>=0&&x.days<=days).map(x=>({...x,asset:a}))).sort((a,b)=>a.days-b.days); }
@@ -5215,9 +5235,25 @@ state.assets.forEach((asset) => {
   if (asset.loanProductId == null) asset.loanProductId = '';
 });
 
+function isUtilityPaymentTemplate(item) {
+  if (!item || typeof item !== 'object') return false;
+  const type = String(item.paymentType || item.type || '').trim().toLowerCase();
+  // К недвижимости можно привязать не только ЖКХ, но и домашние сервисы:
+  // интернет, телевидение и любые подписки, которыми пользуются в этом доме.
+  if (['utilities', 'utility', 'communal', 'communal-payment', 'housing', 'subscription', 'subscriptions'].includes(type)) return true;
+  const text = [item.name, item.category, item.payee, item.project, item.description]
+    .filter(Boolean).join(' ').toLowerCase();
+  return /(коммун|жкх|квартплат|электр|водоснаб|водоотвед|газ|отоплен|теплоснаб|содержание жилья|капремонт|вывоз мусор|интернет|wi[- ]?fi|вай[- ]?фай|телевид|тв|онлайн[- ]?кинотеатр|кинопоиск|иви|okko|wink|start|premier|яндекс(?: плюс)?|подписк|стриминг)/i.test(text);
+}
+
+function utilityPaymentTemplates() {
+  const rows = Array.isArray(state.regularPayments) ? state.regularPayments : [];
+  return rows.filter(isUtilityPaymentTemplate);
+}
+
 function assetLinkedUtilities(asset) {
   const ids = new Set(Array.isArray(asset?.utilityPaymentIds) ? asset.utilityPaymentIds : []);
-  return state.regularPayments.filter((item) => item.paymentType === 'utilities' && ids.has(item.id));
+  return utilityPaymentTemplates().filter((item) => ids.has(item.id));
 }
 
 function assetUtilityPaidSummary(asset) {
@@ -5237,10 +5273,10 @@ function renderAssetUtilityChecks(asset = null) {
   const target = byId('assetUtilityPaymentChecks');
   if (!target) return;
   const selected = new Set(Array.isArray(asset?.utilityPaymentIds) ? asset.utilityPaymentIds : []);
-  const utilities = state.regularPayments.filter((item) => item.paymentType === 'utilities');
+  const utilities = utilityPaymentTemplates();
   target.innerHTML = utilities.length
     ? utilities.map((item) => `<label class="asset-link-check"><input type="checkbox" name="utilityPaymentIds" value="${escapeHtml(item.id)}" ${selected.has(item.id) ? 'checked' : ''}><span><strong>${escapeHtml(item.name)}</strong><small>${money(item.amount)} • ${escapeHtml(item.frequency || 'регулярно')}</small></span></label>`).join('')
-    : '<p class="muted">Сначала создайте коммунальные платежи в разделе «Календарь».</p>';
+    : '<p class="muted">Сначала создайте коммунальные платежи, интернет или подписки в разделах «Календарь» и «Вклады и кредиты».</p>';
 }
 
 function updateAssetLinkFields() {
@@ -5249,12 +5285,41 @@ function updateAssetLinkFields() {
   const type = form.elements.type.value;
   const utilitySection = byId('assetUtilityLinkSection');
   const loanSection = byId('assetLoanLinkSection');
+  const locationField = byId('assetDialogLocationField');
+  const serialField = byId('assetDialogSerialField');
+  const warrantyDateField = byId('assetDialogWarrantyDateField');
+  const vehicleWarrantyFields = byId('assetDialogVehicleWarrantyFields');
+  const serviceField = byId('assetDialogServiceField');
   if (utilitySection) utilitySection.hidden = type !== 'realEstate';
   if (loanSection) loanSection.hidden = !['realEstate', 'vehicle'].includes(type);
+  if (locationField) locationField.hidden = ['vehicle','appliance'].includes(type);
+  if (serialField) serialField.hidden = ['realEstate','appliance'].includes(type);
+  if (warrantyDateField) warrantyDateField.hidden = ['realEstate','vehicle'].includes(type);
+  if (vehicleWarrantyFields) vehicleWarrantyFields.hidden = type !== 'vehicle';
+  if (serviceField) serviceField.hidden = type === 'realEstate';
   const hint = byId('assetLoanHint');
   if (hint) hint.textContent = type === 'vehicle'
     ? 'Можно привязать автокредит по этому автомобилю.'
     : 'Можно привязать ипотеку по этой квартире или дому.';
+  if (type === 'realEstate') {
+    form.elements.location.value = form.elements.location.value || '';
+    form.elements.serialNumber.value = '';
+    form.elements.warrantyEndDate.value = '';
+    form.elements.serviceDate.value = '';
+  }
+  if (type === 'vehicle') {
+    form.elements.location.value = '';
+    form.elements.warrantyEndDate.value = '';
+  }
+  if (type === 'appliance') {
+    form.elements.location.value = '';
+    form.elements.serialNumber.value = '';
+  }
+  if (type !== 'vehicle') {
+    if(form.elements.vehicleWarrantyYears) form.elements.vehicleWarrantyYears.value='';
+    if(form.elements.vehicleWarrantyKm) form.elements.vehicleWarrantyKm.value='';
+    if(form.elements.currentMileage) form.elements.currentMileage.value='';
+  }
   if (type !== 'realEstate') {
     form.querySelectorAll('input[name="utilityPaymentIds"]').forEach((input) => { input.checked = false; });
   }
@@ -5310,11 +5375,12 @@ openAssetDetails = function openAssetDetailsWithLinks(asset) {
     <div class="asset-detail-grid">
       <div><span>Покупка</span><strong>${asset.purchaseDate ? formatTransactionDate(asset.purchaseDate) : '—'}</strong><small>${money(asset.purchasePrice)}</small></div>
       <div><span>Текущая стоимость</span><strong>${money(asset.currentValue || asset.purchasePrice)}</strong></div>
-      <div><span>Серийный номер / VIN</span><strong>${escapeHtml(asset.serialNumber || '—')}</strong></div>
+      ${!['realEstate','appliance'].includes(asset.type)?`<div><span>${asset.type==='vehicle'?'VIN':'Серийный номер'}</span><strong>${escapeHtml(asset.serialNumber || '—')}</strong></div>`:''}
+      ${asset.type==='vehicle'?`<div><span>Гарантия автомобиля</span><strong>${escapeHtml(assetVehicleWarrantyStatus(asset)||'Не указана')}</strong></div>`:''}
       <div><span>Страховка</span><strong>${escapeHtml(policy?.objectName || policy?.name || 'Не связана')}</strong></div>
     </div>
     ${asset.type === 'realEstate' ? `<section class="asset-linked-block">
-      <div class="panel-head"><div><h3>ЖКХ этой недвижимости</h3><p>${utilities.length ? `${utilities.length} платежей • оплачено ${money(utilitySummary.total)} (${utilitySummary.count} операций)` : 'Коммунальные платежи не привязаны'}</p></div><button class="ghost open-asset-utilities" type="button">Открыть календарь</button></div>
+      <div class="panel-head"><div><h3>Расходы и сервисы этой недвижимости</h3><p>${utilities.length ? `${utilities.length} платежей • оплачено ${money(utilitySummary.total)} (${utilitySummary.count} операций)` : 'Платежи и домашние сервисы не привязаны'}</p></div><button class="ghost open-asset-utilities" type="button">Открыть календарь</button></div>
       ${utilities.map((item) => `<div class="asset-linked-row"><div><strong>${escapeHtml(item.name)}</strong><small>${money(item.amount)} • ${escapeHtml(item.frequency || 'регулярно')}</small></div></div>`).join('')}
     </section>` : ''}
     ${['realEstate', 'vehicle'].includes(asset.type) ? `<section class="asset-linked-block"><div class="panel-head"><div><h3>${asset.type === 'realEstate' ? 'Ипотека' : 'Автокредит'}</h3><p>${loan ? `${escapeHtml(loan.name)} • остаток ${money(typeof loanRemaining === 'function' ? loanRemaining(loan) : (loan.remainingBalance || loan.principal || 0))}` : 'Кредит не привязан'}</p></div>${loan ? `<button class="ghost open-linked-loan" type="button" data-product-id="${escapeHtml(loan.id)}">Подробнее</button>` : ''}</div></section>` : ''}
@@ -5344,10 +5410,13 @@ byId('assetForm')?.addEventListener('submit', (event) => {
     purchaseDate: data.purchaseDate || '',
     purchasePrice: Number(data.purchasePrice) || 0,
     currentValue: Number(data.currentValue) || 0,
-    location: data.location || '',
-    serialNumber: data.serialNumber || '',
-    warrantyEndDate: data.warrantyEndDate || '',
-    serviceDate: data.serviceDate || '',
+    location: ['vehicle','appliance'].includes(data.type) ? '' : (data.location || ''),
+    serialNumber: ['realEstate','appliance'].includes(data.type) ? '' : (data.serialNumber || ''),
+    warrantyEndDate: ['realEstate','vehicle'].includes(data.type) ? '' : (data.warrantyEndDate || ''),
+    vehicleWarrantyYears: data.type === 'vehicle' ? (Number(data.vehicleWarrantyYears) || 0) : 0,
+    vehicleWarrantyKm: data.type === 'vehicle' ? (Number(data.vehicleWarrantyKm) || 0) : 0,
+    currentMileage: data.type === 'vehicle' ? (Number(data.currentMileage) || 0) : 0,
+    serviceDate: data.type === 'realEstate' ? '' : (data.serviceDate || ''),
     taxDate: data.taxDate || '',
     insurancePolicyId: data.insurancePolicyId || '',
     loanProductId: ['realEstate', 'vehicle'].includes(data.type) ? (data.loanProductId || '') : '',
