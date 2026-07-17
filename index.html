@@ -617,7 +617,24 @@
 
 
 <section class="view" id="assets">
-<div class="panel-head page-actions"><div><h2>Имущество, документы и гарантии</h2><p>Единая картотека недвижимости, автомобилей, техники и важных документов</p></div><button class="primary" id="addAssetBtn" type="button">+ Добавить имущество</button></div>
+<div class="panel-head page-actions"><div><h2>Имущество, документы и гарантии</h2><p>Единая картотека недвижимости, автомобилей, техники и важных документов</p></div><a class="primary button-link" id="addAssetBtn" href="#assetInlineEditor">+ Добавить имущество</a></div>
+<section class="panel asset-inline-editor" id="assetInlineEditor">
+  <div class="panel-head"><div><h3>Добавить имущество</h3><p>Форма размещена прямо на странице и не зависит от диалоговых окон Android WebView.</p></div></div>
+  <form id="assetInlineForm">
+    <div class="form-grid two"><label>Тип<select name="type" required><option value="realEstate">Недвижимость</option><option value="vehicle">Автомобиль</option><option value="appliance">Техника</option><option value="valuable">Ценная покупка</option><option value="other">Прочее</option></select></label><label>Владелец<select name="ownerMemberId" id="assetInlineOwnerSelect"></select></label></div>
+    <label>Название<input name="name" required placeholder="Квартира, автомобиль, холодильник"></label>
+    <div class="form-grid two"><label>Дата покупки<input name="purchaseDate" type="date"></label><label>Стоимость покупки, ₽<input name="purchasePrice" type="number" min="0" step="1"></label></div>
+    <div class="form-grid two"><label>Текущая стоимость, ₽<input name="currentValue" type="number" min="0" step="1"></label><label>Место / адрес<input name="location"></label></div>
+    <div class="form-grid two"><label>Серийный номер / VIN<input name="serialNumber"></label><label>Гарантия до<input name="warrantyEndDate" type="date"></label></div>
+    <div class="form-grid two"><label>Следующее обслуживание<input name="serviceDate" type="date"></label><label>Налог / обязательный платёж до<input name="taxDate" type="date"></label></div>
+    <label>Связанная страховка<select name="insurancePolicyId" id="assetInlineInsuranceSelect"><option value="">Не связана</option></select></label>
+    <label id="assetInlineLoanSection">Связанный кредит<select name="loanProductId" id="assetInlineLoanSelect"><option value="">Не связан</option></select><small>Для недвижимости — ипотека, для автомобиля — автокредит.</small></label>
+    <section id="assetInlineUtilitySection"><h4>Расходы по ЖКХ</h4><div class="asset-link-checks" id="assetInlineUtilityChecks"></div></section>
+    <label>Заметки<textarea name="notes" rows="3"></textarea></label>
+    <div class="button-row"><button class="primary" type="submit">Сохранить имущество</button><button class="ghost" type="reset">Очистить</button></div>
+    <p class="form-status" id="assetInlineStatus" aria-live="polite"></p>
+  </form>
+</section>
 <div class="metric-grid four"><article class="metric"><span>Общая стоимость</span><strong id="assetTotalValue">0 ₽</strong></article><article class="metric"><span>Объектов</span><strong id="assetCount">0</strong></article><article class="metric"><span>На гарантии</span><strong id="assetWarrantyCount">0</strong></article><article class="metric"><span>Ближайшие сроки</span><strong id="assetDeadlineCount">0</strong></article></div>
 <section class="panel"><div class="filter-grid"><label>Тип<select id="assetTypeFilter"><option value="all">Все типы</option><option value="realEstate">Недвижимость</option><option value="vehicle">Автомобиль</option><option value="appliance">Техника</option><option value="valuable">Ценная покупка</option><option value="other">Прочее</option></select></label><label>Владелец<select id="assetOwnerFilter"><option value="all">Все владельцы</option></select></label><label>Поиск<input id="assetSearch" placeholder="Название, адрес, серийный номер"></label></div></section>
 <div class="asset-grid" id="assetCards"></div>
@@ -1300,6 +1317,100 @@
   }, true);
 
   window.openAssetFormFallback = openAssetFallback;
+})();
+</script>
+
+
+<script>
+(function () {
+  function esc(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function (ch) {
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[ch];
+    });
+  }
+  function getState() {
+    try { return typeof state !== 'undefined' ? state : null; } catch (e) { return null; }
+  }
+  function fillInlineAssetLists() {
+    var st = getState();
+    var form = document.getElementById('assetInlineForm');
+    if (!form || !st) return;
+    var members = Array.isArray(st.familyMembers) ? st.familyMembers.filter(function (m) { return m.active !== false; }) : [];
+    var owner = document.getElementById('assetInlineOwnerSelect');
+    if (owner) owner.innerHTML = members.map(function (m) { return '<option value="'+esc(m.id)+'">'+esc(m.name)+'</option>'; }).join('');
+    var insurance = document.getElementById('assetInlineInsuranceSelect');
+    if (insurance) insurance.innerHTML = '<option value="">Не связана</option>' + (Array.isArray(st.insurancePolicies) ? st.insurancePolicies : []).map(function (p) { return '<option value="'+esc(p.id)+'">'+esc(p.objectName || p.name || 'Страховка')+'</option>'; }).join('');
+    var loans = document.getElementById('assetInlineLoanSelect');
+    if (loans) loans.innerHTML = '<option value="">Не связан</option>' + (Array.isArray(st.financialProducts) ? st.financialProducts : []).filter(function (p) { return p.type === 'loan'; }).map(function (p) { return '<option value="'+esc(p.id)+'">'+esc(p.name || 'Кредит')+'</option>'; }).join('');
+    var utilityBox = document.getElementById('assetInlineUtilityChecks');
+    var utilities = (Array.isArray(st.regularPayments) ? st.regularPayments : []).filter(function (p) { return p.paymentType === 'utilities'; });
+    if (utilityBox) utilityBox.innerHTML = utilities.length ? utilities.map(function (p) { return '<label class="asset-link-check"><input type="checkbox" name="utilityPaymentIds" value="'+esc(p.id)+'"><span><strong>'+esc(p.name)+'</strong><small>'+esc(p.frequency || 'регулярно')+'</small></span></label>'; }).join('') : '<p class="muted">Коммунальные платежи ещё не созданы.</p>';
+    updateInlineType();
+  }
+  function updateInlineType() {
+    var form = document.getElementById('assetInlineForm');
+    if (!form) return;
+    var type = form.elements.type.value;
+    var loan = document.getElementById('assetInlineLoanSection');
+    var utility = document.getElementById('assetInlineUtilitySection');
+    if (loan) loan.hidden = !(type === 'realEstate' || type === 'vehicle');
+    if (utility) utility.hidden = type !== 'realEstate';
+  }
+  document.addEventListener('DOMContentLoaded', fillInlineAssetLists);
+  document.addEventListener('click', function (event) {
+    var link = event.target && event.target.closest ? event.target.closest('#addAssetBtn') : null;
+    if (!link) return;
+    setTimeout(function () {
+      fillInlineAssetLists();
+      var panel = document.getElementById('assetInlineEditor');
+      if (panel) panel.scrollIntoView({behavior:'smooth', block:'start'});
+    }, 0);
+  }, true);
+  var form = document.getElementById('assetInlineForm');
+  if (form) {
+    form.elements.type.addEventListener('change', updateInlineType);
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      var st = getState();
+      var status = document.getElementById('assetInlineStatus');
+      if (!st) { if (status) status.textContent = 'Не удалось открыть базу приложения.'; return; }
+      if (!Array.isArray(st.assets)) st.assets = [];
+      var data = new FormData(form);
+      var type = String(data.get('type') || 'other');
+      var asset = {
+        id: 'asset-' + Date.now(),
+        type: type,
+        name: String(data.get('name') || '').trim(),
+        ownerMemberId: String(data.get('ownerMemberId') || 'family-tatiana'),
+        purchaseDate: String(data.get('purchaseDate') || ''),
+        purchasePrice: Number(data.get('purchasePrice')) || 0,
+        currentValue: Number(data.get('currentValue')) || 0,
+        location: String(data.get('location') || ''),
+        serialNumber: String(data.get('serialNumber') || ''),
+        warrantyEndDate: String(data.get('warrantyEndDate') || ''),
+        serviceDate: String(data.get('serviceDate') || ''),
+        taxDate: String(data.get('taxDate') || ''),
+        insurancePolicyId: String(data.get('insurancePolicyId') || ''),
+        loanProductId: (type === 'realEstate' || type === 'vehicle') ? String(data.get('loanProductId') || '') : '',
+        utilityPaymentIds: type === 'realEstate' ? Array.from(form.querySelectorAll('input[name="utilityPaymentIds"]:checked')).map(function (input) { return input.value; }) : [],
+        notes: String(data.get('notes') || ''),
+        documents: []
+      };
+      if (!asset.name) { if (status) status.textContent = 'Введите название имущества.'; return; }
+      st.assets.push(asset);
+      try {
+        if (typeof saveState === 'function') saveState();
+        if (typeof render === 'function') render();
+        if (typeof setView === 'function') setView('assets');
+        form.reset();
+        fillInlineAssetLists();
+        if (status) status.textContent = 'Имущество сохранено.';
+      } catch (error) {
+        if (status) status.textContent = 'Ошибка сохранения: ' + (error && error.message ? error.message : error);
+      }
+    }, true);
+  }
+  setTimeout(fillInlineAssetLists, 500);
 })();
 </script>
 

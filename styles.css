@@ -1474,3 +1474,10 @@ body[data-family-role="child"] .admin-only{display:none!important}
 
 .asset-dialog-force-open{display:block!important;position:fixed!important;inset:auto!important;left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;z-index:2147483647!important;background:var(--panel,#fff)!important;border:1px solid var(--line,#dbe5ea)!important;border-radius:18px!important;box-shadow:0 24px 80px rgba(0,0,0,.28)!important;padding:0!important;}
 .asset-dialog-force-open::backdrop{background:rgba(20,32,38,.45)!important;}
+
+/* Package 10.6: inline asset editor, independent of dialog support */
+.button-link{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
+.asset-inline-editor{margin:14px 0 18px;scroll-margin-top:18px;border:2px solid rgba(22,139,135,.22)}
+.asset-inline-editor h4{margin:8px 0}
+.asset-inline-editor .form-status{min-height:22px;margin:8px 0 0;font-weight:700;color:#13736f}
+#assetInlineUtilitySection[hidden],#assetInlineLoanSection[hidden]{display:none!important}
