@@ -10,8 +10,8 @@ android {
         applicationId "ru.finporyadok.app"
         minSdk 23
         targetSdk 35
-        versionCode 47
-        versionName "0.17.5"
+        versionCode 48
+        versionName "0.17.6"
     }
 }
 
