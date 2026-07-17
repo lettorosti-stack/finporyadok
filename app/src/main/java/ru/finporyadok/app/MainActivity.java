@@ -3,10 +3,13 @@ package ru.finporyadok.app;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.util.Base64;
 import android.os.Bundle;
 import java.io.OutputStream;
+import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.BufferedReader;
@@ -29,6 +32,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.view.ViewGroup;
 import androidx.core.content.FileProvider;
+import androidx.documentfile.provider.DocumentFile;
 
 import com.google.android.gms.tasks.Task;
 import com.google.mlkit.vision.barcode.common.Barcode;
@@ -41,6 +45,9 @@ import org.json.JSONObject;
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 1001;
     private static final int FILE_SAVE_REQUEST = 1002;
+    private static final int CLOUD_FOLDER_REQUEST = 1003;
+    private static final String CLOUD_PREFS = "finporyadok_cloud";
+    private static final String CLOUD_URI_KEY = "tree_uri";
     private WebView webView;
     private ValueCallback<Uri[]> filePathCallback;
     private String pendingFileContent;
@@ -75,6 +82,7 @@ public class MainActivity extends Activity {
         webView.addJavascriptInterface(new AndroidFileBridge(), "AndroidFileBridge");
         webView.addJavascriptInterface(new AndroidOfficialDataBridge(), "AndroidOfficialDataBridge");
         webView.addJavascriptInterface(new AndroidReceiptOcrBridge(), "AndroidReceiptOcr");
+        webView.addJavascriptInterface(new AndroidCloudSyncBridge(), "AndroidCloudSync");
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest request) {
@@ -341,6 +349,102 @@ public class MainActivity extends Activity {
         webView.evaluateJavascript(js, null);
     }
 
+    public final class AndroidCloudSyncBridge {
+        @JavascriptInterface
+        public void chooseCloudFolder() {
+            runOnUiThread(() -> {
+                try {
+                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+                    startActivityForResult(intent, CLOUD_FOLDER_REQUEST);
+                } catch (Exception error) { sendCloudReadError(error.getMessage()); }
+            });
+        }
+
+        @JavascriptInterface
+        public void getCloudStatus() {
+            String raw = getSharedPreferences(CLOUD_PREFS, MODE_PRIVATE).getString(CLOUD_URI_KEY, "");
+            if (raw == null || raw.isEmpty()) { sendCloudStatus(false, ""); return; }
+            try {
+                Uri uri = Uri.parse(raw);
+                DocumentFile folder = DocumentFile.fromTreeUri(MainActivity.this, uri);
+                sendCloudStatus(folder != null && folder.exists(), folder == null ? "" : folder.getName());
+            } catch (Exception error) { sendCloudStatus(false, ""); }
+        }
+
+        @JavascriptInterface
+        public void disconnectCloudFolder() {
+            getSharedPreferences(CLOUD_PREFS, MODE_PRIVATE).edit().remove(CLOUD_URI_KEY).apply();
+            String js = "window.onNativeCloudFolderDisconnected();";
+            webView.post(() -> webView.evaluateJavascript(js, null));
+        }
+
+        @JavascriptInterface
+        public void readSyncFile(String fileName) {
+            new Thread(() -> {
+                try {
+                    DocumentFile folder = getCloudFolder();
+                    DocumentFile file = folder.findFile(safeCloudFileName(fileName));
+                    if (file == null || !file.exists()) throw new IllegalStateException("Файл синхронизации не найден");
+                    try (InputStream input = getContentResolver().openInputStream(file.getUri()); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                        if (input == null) throw new IllegalStateException("Не удалось открыть облачный файл");
+                        byte[] buffer = new byte[8192]; int count;
+                        while ((count = input.read(buffer)) != -1) out.write(buffer, 0, count);
+                        String text = out.toString(StandardCharsets.UTF_8.name());
+                        String js = "window.onNativeCloudRead(" + JSONObject.quote(text) + ");";
+                        webView.post(() -> webView.evaluateJavascript(js, null));
+                    }
+                } catch (Exception error) { sendCloudReadError(error.getMessage()); }
+            }).start();
+        }
+
+        @JavascriptInterface
+        public void writeSyncFile(String fileName, String content) {
+            new Thread(() -> {
+                try {
+                    DocumentFile folder = getCloudFolder();
+                    String safe = safeCloudFileName(fileName);
+                    DocumentFile file = folder.findFile(safe);
+                    if (file == null) file = folder.createFile("application/json", safe);
+                    if (file == null) throw new IllegalStateException("Не удалось создать облачный файл");
+                    try (OutputStream output = getContentResolver().openOutputStream(file.getUri(), "wt")) {
+                        if (output == null) throw new IllegalStateException("Не удалось открыть облачный файл для записи");
+                        output.write((content == null ? "" : content).getBytes(StandardCharsets.UTF_8));
+                        output.flush();
+                    }
+                    String js = "window.onNativeCloudWritten();";
+                    webView.post(() -> webView.evaluateJavascript(js, null));
+                } catch (Exception error) { sendCloudWriteError(error.getMessage()); }
+            }).start();
+        }
+    }
+
+    private DocumentFile getCloudFolder() {
+        String raw = getSharedPreferences(CLOUD_PREFS, MODE_PRIVATE).getString(CLOUD_URI_KEY, "");
+        if (raw == null || raw.isEmpty()) throw new IllegalStateException("Облачная папка не подключена");
+        DocumentFile folder = DocumentFile.fromTreeUri(this, Uri.parse(raw));
+        if (folder == null || !folder.exists() || !folder.canRead() || !folder.canWrite()) throw new IllegalStateException("Нет доступа к выбранной облачной папке");
+        return folder;
+    }
+
+    private String safeCloudFileName(String value) {
+        String name = value == null || value.trim().isEmpty() ? "finporyadok-family-sync.json" : value.trim();
+        return name.replaceAll("[^a-zA-Z0-9._-]", "_");
+    }
+
+    private void sendCloudStatus(boolean connected, String name) {
+        String js = "window.onNativeCloudStatus(" + connected + "," + JSONObject.quote(name == null ? "" : name) + ");";
+        webView.post(() -> webView.evaluateJavascript(js, null));
+    }
+    private void sendCloudReadError(String message) {
+        String js = "window.onNativeCloudReadError(" + JSONObject.quote(message == null ? "Ошибка чтения облака" : message) + ");";
+        webView.post(() -> webView.evaluateJavascript(js, null));
+    }
+    private void sendCloudWriteError(String message) {
+        String js = "window.onNativeCloudWriteError(" + JSONObject.quote(message == null ? "Ошибка записи в облако" : message) + ");";
+        webView.post(() -> webView.evaluateJavascript(js, null));
+    }
+
     public final class AndroidFileBridge {
         @JavascriptInterface
         public void openPdfBase64(String base64Data, String fileName) {
@@ -431,6 +535,19 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == CLOUD_FOLDER_REQUEST) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                Uri uri = data.getData();
+                int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                try { getContentResolver().takePersistableUriPermission(uri, flags); } catch (Exception ignored) { }
+                getSharedPreferences(CLOUD_PREFS, MODE_PRIVATE).edit().putString(CLOUD_URI_KEY, uri.toString()).apply();
+                DocumentFile folder = DocumentFile.fromTreeUri(this, uri);
+                String name = folder == null || folder.getName() == null ? "Облачная папка" : folder.getName();
+                String js = "window.onNativeCloudFolderSelected(" + JSONObject.quote(name) + ");";
+                webView.post(() -> webView.evaluateJavascript(js, null));
+            }
+            return;
+        }
         if (requestCode == FILE_SAVE_REQUEST) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
                 Uri uri = data.getData();

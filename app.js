@@ -3,7 +3,7 @@ const storeKey = "finporyadok.state.alzex.v1";
   try { localStorage.removeItem(legacyKey); } catch {}
 });
 const seedRows = window.ANDROMONEY_DATA?.rows || [];
-const CURRENT_SCHEMA_VERSION = 5;
+const CURRENT_SCHEMA_VERSION = 6;
 const savedState = loadState();
 
 const state = {
@@ -90,6 +90,10 @@ function migrateStoredState(raw) {
     (saved.accounts || []).forEach((account) => { if (account && typeof account === "object" && !account.ownerMemberId) account.ownerMemberId = "family-tatiana"; });
     version = 5;
   }
+  if (version < 6) {
+    saved.syncMeta = saved.syncMeta && typeof saved.syncMeta === "object" ? saved.syncMeta : {};
+    version = 6;
+  }
   saved.schemaVersion = CURRENT_SCHEMA_VERSION;
   return saved;
 }
@@ -168,6 +172,7 @@ function saveState() {
   }));
   localStorage.setItem(`${storeKey}.lastSavedAt`, savedAt);
   updateDatabaseStatus();
+  scheduleCloudSyncAfterSave();
 }
 
 function saveRows() {
@@ -4783,3 +4788,129 @@ document.addEventListener('click',e=>{const edit=e.target.closest('.edit-regular
 byId('plannedPaymentForm')?.addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());state.plannedPaymentStates[d.occurrenceId]={paidDate:d.paidDate||dateLocal(new Date()),paidAmount:d.paidAmount===''?0:Number(d.paidAmount)||0,transactionId:d.transactionId||'',comment:d.comment||''};saveState();byId('plannedPaymentDialog').close();render();});
 byId('markPlannedUnpaidBtn')?.addEventListener('click',()=>{const id=byId('plannedPaymentForm').elements.occurrenceId.value;delete state.plannedPaymentStates[id];saveState();byId('plannedPaymentDialog').close();render();});
 byId('loanPaymentForm')?.addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());const p=state.financialProducts.find(x=>x.id===d.productId);if(!p)return;const amount=Number(d.amount)||0;let principalPart=Number(d.principalPart)||0;if(!principalPart){const monthlyInterest=loanRemaining(p)*ratePerMonth(p);principalPart=Math.max(0,Math.min(loanRemaining(p),amount-monthlyInterest));if(d.paymentKind==='early')principalPart=Math.min(loanRemaining(p),amount);}p.actualPayments=[...loanActualPayments(p),{id:`loan-payment-${Date.now()}`,date:d.date,amount,paymentKind:d.paymentKind,principalPart,interestPart:Math.max(0,amount-principalPart),transactionId:d.transactionId||'',comment:d.comment||''}];saveState();byId('loanPaymentDialog').close();render();setView('finance-products');});
+
+
+// Package 6 — offline-first cloud folder synchronization
+const CLOUD_SYNC_FILE = "finporyadok-family-sync.json";
+const CLOUD_META_KEY = `${storeKey}.cloud.meta`;
+const CLOUD_HISTORY_KEY = `${storeKey}.cloud.history`;
+let cloudSyncBusy = false;
+let cloudSyncTimer = null;
+let cloudReadResolver = null;
+let cloudWriteResolver = null;
+let suppressCloudAutoSync = false;
+
+function cloudMeta(){
+  try{return JSON.parse(localStorage.getItem(CLOUD_META_KEY)||"{}");}catch{return {};}
+}
+function saveCloudMeta(meta){localStorage.setItem(CLOUD_META_KEY,JSON.stringify(meta||{}));renderCloudSyncStatus();}
+function cloudHistory(){try{return JSON.parse(localStorage.getItem(CLOUD_HISTORY_KEY)||"[]");}catch{return [];}}
+function addCloudHistory(action,detail="",level="info"){
+  const rows=cloudHistory();rows.unshift({id:`sync-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,at:new Date().toISOString(),action,detail,level});
+  localStorage.setItem(CLOUD_HISTORY_KEY,JSON.stringify(rows.slice(0,100)));renderCloudHistory();
+}
+function cloudDeviceId(){
+  let id=localStorage.getItem(`${storeKey}.deviceId`);if(!id){id=`device-${Date.now()}-${Math.random().toString(36).slice(2,10)}`;localStorage.setItem(`${storeKey}.deviceId`,id);}return id;
+}
+function cloudDeviceName(){
+  let name=localStorage.getItem(`${storeKey}.deviceName`);if(!name){name=`Устройство ${cloudDeviceId().slice(-5).toUpperCase()}`;localStorage.setItem(`${storeKey}.deviceName`,name);}return name;
+}
+function currentSerializableState(){
+  return migrateStoredState(JSON.parse(localStorage.getItem(storeKey)||"{}"));
+}
+function stableJson(value){
+  if(Array.isArray(value))return `[${value.map(stableJson).join(",")}]`;
+  if(value&&typeof value==="object")return `{${Object.keys(value).sort().map(k=>JSON.stringify(k)+":"+stableJson(value[k])).join(",")}}`;
+  return JSON.stringify(value);
+}
+function simpleHash(value){
+  const text=typeof value==="string"?value:stableJson(value);let h=2166136261;for(let i=0;i<text.length;i++){h^=text.charCodeAt(i);h=Math.imul(h,16777619);}return (h>>>0).toString(16);
+}
+function makeCloudEnvelope(){
+  const payload=currentSerializableState();
+  return {format:"finporyadok-cloud-sync",version:1,schemaVersion:CURRENT_SCHEMA_VERSION,updatedAt:new Date().toISOString(),deviceId:cloudDeviceId(),deviceName:cloudDeviceName(),payload,hash:simpleHash(payload)};
+}
+function arrayKey(item,index){return item?.id||item?.occurrenceId||item?.name||`index-${index}`;}
+function mergeArray(local=[],remote=[],remoteNewer=false,conflicts=[]){
+  const map=new Map();local.forEach((x,i)=>map.set(arrayKey(x,i),structuredCloneSafe(x)));
+  remote.forEach((r,i)=>{const key=arrayKey(r,i),l=map.get(key);if(!l){map.set(key,structuredCloneSafe(r));return;}if(stableJson(l)===stableJson(r))return;
+    const lt=Date.parse(l.updatedAt||l.modifiedAt||0)||0,rt=Date.parse(r.updatedAt||r.modifiedAt||0)||0;
+    if(rt>lt)map.set(key,structuredCloneSafe(r));else if(!lt&&!rt&&remoteNewer)map.set(key,structuredCloneSafe(r));
+    conflicts.push(key);
+  });return [...map.values()];
+}
+function mergeCloudPayload(local,remote,remoteUpdatedAt){
+  const out=structuredCloneSafe(local),conflicts=[];const remoteNewer=(Date.parse(remoteUpdatedAt||0)||0)>(Date.parse(local.savedAt||0)||0);
+  ["rows","accounts","categories","importArchive","shopping","financialProducts","insurancePolicies","alimonyRules","regularPayments","familyMembers","familyActivityLog"].forEach(k=>{out[k]=mergeArray(local[k]||[],remote[k]||[],remoteNewer,conflicts);});
+  ["plannedPaymentStates","shoppingAliases","officialSubsistenceByYear"].forEach(k=>{out[k]={...(local[k]||{}),...(remote[k]||{})};});
+  out.officialSubsistenceData=remoteNewer?(remote.officialSubsistenceData||local.officialSubsistenceData):(local.officialSubsistenceData||remote.officialSubsistenceData);
+  out.activeMemberId=local.activeMemberId||remote.activeMemberId||"family-tatiana";out.schemaVersion=CURRENT_SCHEMA_VERSION;out.savedAt=new Date().toISOString();
+  return {payload:out,conflicts:[...new Set(conflicts)]};
+}
+function applyCloudPayload(payload){
+  suppressCloudAutoSync=true;createLocalSafetySnapshot("before-cloud-apply");localStorage.setItem(storeKey,JSON.stringify(migrateStoredState(payload)));location.reload();
+}
+function nativeCloudAvailable(){return Boolean(window.AndroidCloudSync&&typeof window.AndroidCloudSync.readSyncFile==="function");}
+function requestCloudRead(){
+  return new Promise((resolve,reject)=>{if(!nativeCloudAvailable())return reject(new Error("Облачная папка доступна только в Android-приложении."));cloudReadResolver={resolve,reject};window.AndroidCloudSync.readSyncFile(CLOUD_SYNC_FILE);setTimeout(()=>{if(cloudReadResolver){cloudReadResolver=null;reject(new Error("Облако не ответило вовремя."));}},15000);});
+}
+function requestCloudWrite(text){
+  return new Promise((resolve,reject)=>{if(!nativeCloudAvailable())return reject(new Error("Облачная папка доступна только в Android-приложении."));cloudWriteResolver={resolve,reject};window.AndroidCloudSync.writeSyncFile(CLOUD_SYNC_FILE,text);setTimeout(()=>{if(cloudWriteResolver){cloudWriteResolver=null;reject(new Error("Не удалось подтвердить запись в облако."));}},15000);});
+}
+window.onNativeCloudFolderSelected=(name)=>{const meta=cloudMeta();meta.connected=true;meta.folderName=name||"Облачная папка";meta.autoSync=meta.autoSync!==false;saveCloudMeta(meta);addCloudHistory("Подключена облачная папка",meta.folderName);syncCloudNow("connect");};
+window.onNativeCloudFolderDisconnected=()=>{saveCloudMeta({connected:false,autoSync:false});addCloudHistory("Облачная папка отключена");};
+window.onNativeCloudRead=(content)=>{if(cloudReadResolver){const r=cloudReadResolver;cloudReadResolver=null;r.resolve(content||"");}};
+window.onNativeCloudReadError=(message)=>{if(cloudReadResolver){const r=cloudReadResolver;cloudReadResolver=null;r.reject(new Error(message||"Ошибка чтения облака"));}};
+window.onNativeCloudWritten=()=>{if(cloudWriteResolver){const r=cloudWriteResolver;cloudWriteResolver=null;r.resolve(true);}};
+window.onNativeCloudWriteError=(message)=>{if(cloudWriteResolver){const r=cloudWriteResolver;cloudWriteResolver=null;r.reject(new Error(message||"Ошибка записи в облако"));}};
+window.onNativeCloudStatus=(connected,name)=>{const meta=cloudMeta();meta.connected=Boolean(connected);if(name)meta.folderName=name;saveCloudMeta(meta);if(meta.connected&&meta.autoSync!==false)setTimeout(()=>syncCloudNow("startup"),700);};
+
+async function syncCloudNow(reason="manual"){
+  if(cloudSyncBusy)return;const meta=cloudMeta();if(!meta.connected){setCloudMessage("Сначала выберите облачную папку.","error");return;}
+  cloudSyncBusy=true;renderCloudSyncStatus("busy");setCloudMessage("Сверяем локальную и облачную базы…");
+  try{
+    let remoteText="";try{remoteText=await requestCloudRead();}catch(error){if(!/не найден|отсутств/i.test(error.message))throw error;}
+    const localEnvelope=makeCloudEnvelope();
+    if(!remoteText.trim()){
+      await requestCloudWrite(JSON.stringify(localEnvelope));
+      saveCloudMeta({...meta,connected:true,lastSyncAt:new Date().toISOString(),lastHash:localEnvelope.hash,lastDirection:"upload"});
+      addCloudHistory("Первая база загружена в облако",`${state.rows.length} операций`);setCloudMessage("Облачная база создана.","ok");return;
+    }
+    let remote;try{remote=JSON.parse(remoteText);}catch{throw new Error("Облачный файл повреждён или имеет неверный формат.");}
+    if(remote.format!=="finporyadok-cloud-sync"||!remote.payload)throw new Error("В выбранной папке найден несовместимый файл синхронизации.");
+    const remoteHash=remote.hash||simpleHash(remote.payload),localHash=localEnvelope.hash,lastHash=meta.lastHash||"";
+    if(remoteHash===localHash){saveCloudMeta({...meta,lastSyncAt:new Date().toISOString(),lastHash:localHash,lastDirection:"equal"});setCloudMessage("Все устройства синхронизированы.","ok");return;}
+    const localChanged=!lastHash||localHash!==lastHash,remoteChanged=!lastHash||remoteHash!==lastHash;
+    if(!localChanged&&remoteChanged){
+      saveCloudMeta({...meta,lastSyncAt:new Date().toISOString(),lastHash:remoteHash,lastDirection:"download"});addCloudHistory("Получены изменения из облака",remote.deviceName||"Другое устройство");setCloudMessage("Получены новые данные. Приложение перезапускается…","ok");applyCloudPayload(remote.payload);return;
+    }
+    if(localChanged&&!remoteChanged){
+      await requestCloudWrite(JSON.stringify(localEnvelope));saveCloudMeta({...meta,lastSyncAt:new Date().toISOString(),lastHash:localHash,lastDirection:"upload"});addCloudHistory("Изменения отправлены в облако",reason);setCloudMessage("Изменения отправлены в облако.","ok");return;
+    }
+    const merged=mergeCloudPayload(localEnvelope.payload,remote.payload,remote.updatedAt);const mergedEnvelope={...makeCloudEnvelope(),payload:merged.payload};mergedEnvelope.hash=simpleHash(merged.payload);mergedEnvelope.updatedAt=new Date().toISOString();
+    await requestCloudWrite(JSON.stringify(mergedEnvelope));saveCloudMeta({...meta,lastSyncAt:new Date().toISOString(),lastHash:mergedEnvelope.hash,lastDirection:"merge",conflictCount:merged.conflicts.length});
+    addCloudHistory("Базы объединены",merged.conflicts.length?`Требуют внимания совпадающие записи: ${merged.conflicts.length}`:"Конфликтов не обнаружено",merged.conflicts.length?"conflict":"info");
+    if(mergedEnvelope.hash!==localHash){setCloudMessage("Данные объединены. Приложение перезапускается…","ok");applyCloudPayload(merged.payload);return;}
+    setCloudMessage("Локальные и облачные изменения объединены.","ok");
+  }catch(error){addCloudHistory("Ошибка синхронизации",error.message,"error");setCloudMessage(error.message||"Не удалось синхронизировать данные.","error");}
+  finally{cloudSyncBusy=false;renderCloudSyncStatus();}
+}
+function scheduleCloudSyncAfterSave(){
+  if(suppressCloudAutoSync)return;const meta=cloudMeta();if(!meta.connected||meta.autoSync===false)return;clearTimeout(cloudSyncTimer);cloudSyncTimer=setTimeout(()=>syncCloudNow("autosave"),1800);
+}
+function setCloudMessage(text,stateName=""){const el=byId("cloudSyncMessage");if(el)el.textContent=text;const badge=byId("cloudSyncBadge");if(badge&&stateName)badge.dataset.state=stateName;}
+function renderCloudSyncStatus(forceState=""){
+  const meta=cloudMeta(),badge=byId("cloudSyncBadge");if(!badge)return;badge.textContent=cloudSyncBusy||forceState==="busy"?"Синхронизация…":meta.connected?"Подключено":"Не подключено";badge.dataset.state=cloudSyncBusy||forceState==="busy"?"busy":meta.connected?"ok":"";
+  byId("cloudFolderName").textContent=meta.folderName||"Не выбрана";byId("cloudDeviceName").textContent=cloudDeviceName();byId("cloudAutoSync").checked=meta.autoSync!==false;
+  byId("cloudSyncLastAt").textContent=meta.lastSyncAt?`Последняя синхронизация: ${new Date(meta.lastSyncAt).toLocaleString("ru-RU")}`:"Синхронизация ещё не выполнялась";
+  byId("cloudSyncStateText").textContent=meta.lastDirection==="download"?"Последние изменения получены из облака":meta.lastDirection==="upload"?"Последние изменения отправлены в облако":meta.lastDirection==="merge"?`Базы объединены${meta.conflictCount?`, совпадений: ${meta.conflictCount}`:""}`:"Локальные данные готовы к синхронизации";
+  byId("syncNowBtn").disabled=!meta.connected||cloudSyncBusy;byId("disconnectCloudBtn").disabled=!meta.connected;
+}
+function renderCloudHistory(){const box=byId("cloudHistoryList");if(!box)return;const rows=cloudHistory();box.innerHTML=rows.length?rows.map(x=>`<article class="cloud-history-item" data-level="${escapeHtml(x.level||"info")}"><strong>${escapeHtml(x.action)}</strong><span>${escapeHtml(x.detail||"")}</span><small>${new Date(x.at).toLocaleString("ru-RU")}</small></article>`).join(""):'<article class="empty-state"><strong>Журнал пуст</strong><p>Здесь появятся результаты синхронизации.</p></article>';}
+byId("connectCloudFolderBtn")?.addEventListener("click",()=>{if(!nativeCloudAvailable()){setCloudMessage("Выбор облачной папки работает в установленном Android-приложении.","error");return;}window.AndroidCloudSync.chooseCloudFolder();});
+byId("syncNowBtn")?.addEventListener("click",()=>syncCloudNow("manual"));
+byId("disconnectCloudBtn")?.addEventListener("click",()=>{if(!confirm("Отключить облачную папку? Локальная база останется на устройстве."))return;window.AndroidCloudSync?.disconnectCloudFolder();saveCloudMeta({connected:false,autoSync:false});});
+byId("cloudAutoSync")?.addEventListener("change",e=>{const meta=cloudMeta();meta.autoSync=e.target.checked;saveCloudMeta(meta);addCloudHistory(e.target.checked?"Автосинхронизация включена":"Автосинхронизация выключена");if(e.target.checked&&meta.connected)syncCloudNow("auto-enabled");});
+byId("cloudHistoryBtn")?.addEventListener("click",()=>{renderCloudHistory();byId("cloudHistoryDialog")?.showModal();});
+renderCloudSyncStatus();renderCloudHistory();
+if(nativeCloudAvailable())setTimeout(()=>window.AndroidCloudSync.getCloudStatus(),300);

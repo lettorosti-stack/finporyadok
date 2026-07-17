@@ -625,6 +625,38 @@
 </div>
 
 
+<section class="panel cloud-sync-panel">
+  <div class="panel-head">
+    <div>
+      <span class="eyebrow">Облачная синхронизация</span>
+      <h2>Семейная база на всех устройствах</h2>
+      <p>Выберите папку в Google Drive или другом облачном хранилище Android. ФинПорядок будет хранить в ней единый файл синхронизации.</p>
+    </div>
+    <strong id="cloudSyncBadge">Не подключено</strong>
+  </div>
+  <div class="cloud-sync-grid">
+    <article class="cloud-sync-status-card">
+      <span>Облачная папка</span>
+      <strong id="cloudFolderName">Не выбрана</strong>
+      <small id="cloudSyncLastAt">Синхронизация ещё не выполнялась</small>
+    </article>
+    <article class="cloud-sync-status-card">
+      <span>Это устройство</span>
+      <strong id="cloudDeviceName">—</strong>
+      <small id="cloudSyncStateText">Локальные данные защищены резервными снимками</small>
+    </article>
+  </div>
+  <div class="cloud-sync-actions">
+    <button class="primary" id="connectCloudFolderBtn" type="button">Выбрать облачную папку</button>
+    <button class="ghost" id="syncNowBtn" type="button">Синхронизировать сейчас</button>
+    <button class="ghost" id="cloudHistoryBtn" type="button">Журнал синхронизации</button>
+    <button class="ghost danger-soft" id="disconnectCloudBtn" type="button">Отключить</button>
+  </div>
+  <label class="work-expense-checkbox cloud-auto-toggle"><input id="cloudAutoSync" type="checkbox" checked><span><strong>Автоматическая синхронизация</strong><small>Проверять облако при запуске и отправлять изменения после сохранения.</small></span></label>
+  <p class="backup-note" id="cloudSyncMessage">Для первого подключения выберите папку через системное окно Android. Подходит папка Google Drive, OneDrive или локальная папка устройства.</p>
+</section>
+
+
 <section class="panel family-access-panel">
   <div class="panel-head">
     <div><span class="eyebrow">Семейный доступ</span><h2>Профили семьи</h2><p id="currentFamilyAccessSummary">Полный доступ ко всем разделам и данным семьи</p></div>
@@ -1100,6 +1132,12 @@
 <label class="work-expense-checkbox"><input name="canSeeFamilyTotals" type="checkbox"/><span><strong>Показывать общие суммы семьи</strong><small>Для детских профилей по умолчанию отключено.</small></span></label>
 <menu><button class="ghost danger-soft" id="deleteFamilyMemberBtn" type="button">Удалить профиль</button><button data-close type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></menu>
 </form>
+</dialog>
+
+<dialog class="cloud-history-dialog" id="cloudHistoryDialog">
+<header><div><h2>Журнал синхронизации</h2><p>Последние обмены данными и конфликты между устройствами.</p></div><button data-close type="button">×</button></header>
+<div class="cloud-history-list" id="cloudHistoryList"></div>
+<menu><button data-close type="button">Закрыть</button></menu>
 </dialog>
 
 <script src="./andromoney-data.js"></script>
