@@ -379,6 +379,15 @@
 <div class="panel-head"><div><h3>План расходов по кредитам</h3><p>Предстоящие платежи на 12 месяцев</p></div></div>
 <div class="planned-payment-list" id="plannedLoanPayments"></div>
 </section>
+<section class="panel">
+<div class="panel-head page-actions"><div><h3>Подписки и регулярные сервисы</h3><p>Следующее списание, пробный период, изменение цены и отмена</p></div><button class="primary" id="addSubscriptionBtn">+ Подписка</button></div>
+<div class="finance-metrics subscription-metrics">
+<article class="metric-card"><span>В месяц</span><strong id="subscriptionMonthlyTotal">0 ₽</strong><small id="subscriptionActiveCount">0 активных</small></article>
+<article class="metric-card"><span>В год</span><strong id="subscriptionAnnualTotal">0 ₽</strong><small>Оценка по текущим тарифам</small></article>
+<article class="metric-card"><span>Скоро спишется</span><strong id="subscriptionUpcomingTotal">0 ₽</strong><small id="subscriptionUpcomingCount">0 подписок</small></article>
+</div>
+<div class="finance-product-grid" id="subscriptionCards"></div>
+</section>
 </section>
 
 <section class="view" id="reports">
@@ -593,7 +602,7 @@
 <section class="panel forecast-settings"><div><h3>Неснижаемый резерв</h3><p>Эта сумма вычитается из прогнозного свободного остатка.</p></div><label>Сумма <input id="forecastReserve" type="number" min="0" step="100" value="0"></label></section>
 </section>
 <dialog id="budgetPlanDialog"><form method="dialog" id="budgetPlanForm"><header><div><h2>Лимит категории</h2><p>Для выбранного месяца</p></div><button data-close type="button">×</button></header><label>Категория<select id="budgetPlanCategory" name="category" required><option value="">Выберите категорию</option></select></label><label>Для кого<select id="budgetPlanMember" name="memberId"><option value="family">Вся семья</option></select><small>Можно задать отдельный лимит для каждого ребёнка.</small></label><label>Лимит, ₽<input name="limit" type="number" min="0" required></label><label class="check-row"><input name="rollover" type="checkbox"> Переносить остаток</label><footer><button data-close type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></footer></form></dialog>
-<dialog id="savingsGoalDialog"><form method="dialog" id="savingsGoalForm"><header><div><h2>Новая цель</h2><p>Сумма, срок и текущие накопления</p></div><button data-close type="button">×</button></header><label>Название<input name="name" required></label><label>Нужно накопить, ₽<input name="target" type="number" min="0" required></label><label>Уже накоплено, ₽<input name="current" type="number" min="0" value="0"></label><label>Срок<input name="deadline" type="date"></label><label>Счёт<input name="account"></label><footer><button data-close type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></footer></form></dialog>
+<dialog id="savingsGoalDialog"><form method="dialog" id="savingsGoalForm"><header><div><h2>Новая цель</h2><p>Сумма, срок и текущие накопления</p></div><button data-close type="button">×</button></header><label>Для кого<select id="savingsGoalMember" name="memberId"></select><small>Мама видит цели всех членов семьи. Ребёнок видит только свои цели.</small></label><label>Название<input name="name" required></label><label>Нужно накопить, ₽<input name="target" type="number" min="0" required></label><label>Уже накоплено, ₽<input name="current" type="number" min="0" value="0"></label><label>Срок<input name="deadline" type="date"></label><label>Счёт<input name="account"></label><footer><button data-close type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></footer></form></dialog>
 
 <section class="view" id="settings">
 <div class="backup-hero panel">
@@ -1022,6 +1031,10 @@
 </label>
 <label class="loan-only">Категория расходов<select name="expenseCategory" id="financeExpenseCategory"></select></label>
 <label class="deposit-only">Категория доходов<select name="incomeCategory" id="financeIncomeCategory"></select></label>
+<label class="loan-only">При досрочном погашении<select name="earlyRepaymentStrategy"><option value="reduceTerm">Уменьшать срок</option><option value="reducePayment">Уменьшать платёж</option></select></label>
+<label class="loan-only">Страховка по кредиту, ₽ в год<input name="loanInsuranceAnnual" min="0" step="0.01" type="number" value="0"/></label>
+<label class="deposit-only">Автопролонгация<select name="autoProlongation"><option value="false">Нет</option><option value="true">Да</option></select></label>
+<label class="deposit-only">Налог с процентов, %<input name="depositTaxRate" min="0" max="100" step="0.01" type="number" value="0"/></label>
 </div>
 <div class="finance-calculation-preview" id="financeCalculationPreview"></div>
 <menu>
@@ -1087,6 +1100,48 @@
 <label>Комментарий<textarea name="comment" rows="3"></textarea></label>
 </div>
 <menu><button data-close type="button">Отмена</button><button class="primary" type="submit">Сохранить платёж</button></menu>
+</form></dialog>
+
+
+<dialog class="finance-product-dialog" id="financeProductDetailsDialog">
+<header><div><h2 id="financeProductDetailsTitle">Финансовый продукт</h2><p id="financeProductDetailsSubtitle"></p></div><button data-close type="button">×</button></header>
+<div id="financeProductDetailsBody"></div>
+<menu><button data-close type="button">Закрыть</button></menu>
+</dialog>
+
+<dialog class="finance-product-dialog" id="depositMovementDialog">
+<form id="depositMovementForm">
+<header><div><h2>Операция по вкладу</h2><p>Пополнение, снятие или фактическое начисление процентов</p></div><button data-close type="button">×</button></header>
+<input name="productId" type="hidden"/>
+<div class="finance-form-grid">
+<label>Дата<input name="date" type="date" required/></label>
+<label>Тип<select name="movementType"><option value="contribution">Пополнение</option><option value="withdrawal">Снятие</option><option value="interest">Начисление процентов</option></select></label>
+<label>Сумма<input name="amount" type="number" min="0.01" step="0.01" required/></label>
+<label>Связать с операцией<select name="transactionId" id="depositTransactionSelect"><option value="">Не связывать</option></select></label>
+<label>Комментарий<textarea name="comment" rows="3"></textarea></label>
+</div>
+<menu><button data-close type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></menu>
+</form></dialog>
+
+<dialog class="finance-product-dialog" id="subscriptionDialog">
+<form id="subscriptionForm">
+<header><div><h2>Подписка</h2><p>Контроль тарифа, пробного периода и следующего списания</p></div><button data-close type="button">×</button></header>
+<input name="subscriptionId" type="hidden"/>
+<div class="finance-form-grid">
+<label>Название<input name="name" required placeholder="Например, Яндекс Плюс"/></label>
+<label>Сервис или продавец<input name="payee" placeholder="Яндекс, VK, Google…"/></label>
+<label>Стоимость<input name="amount" type="number" min="0" step="0.01" required/></label>
+<label>Период<select name="frequency"><option value="monthly">Ежемесячно</option><option value="quarterly">Раз в квартал</option><option value="halfyear">Раз в полгода</option><option value="yearly">Ежегодно</option></select></label>
+<label>Следующее списание<input name="startDate" type="date" required/></label>
+<label>Окончание пробного периода<input name="trialEndDate" type="date"/></label>
+<label>Предупредить за, дней<input name="remindDays" type="number" min="0" max="60" value="3"/></label>
+<label>Категория<select name="category" id="subscriptionCategorySelect"></select></label>
+<label>Счёт<select name="account" id="subscriptionAccountSelect"></select></label>
+<label>Статус<select name="subscriptionStatus"><option value="active">Активна</option><option value="paused">Приостановлена</option><option value="canceled">Отменена</option></select></label>
+<label>Дата отмены<input name="cancellationDate" type="date"/></label>
+<label>Комментарий<textarea name="comment" rows="3"></textarea></label>
+</div>
+<menu><button class="danger" id="deleteSubscriptionBtn" type="button">Удалить</button><button data-close type="button">Отмена</button><button class="primary" type="submit">Сохранить</button></menu>
 </form></dialog>
 
 <dialog id="categoryDialog">

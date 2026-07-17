@@ -3,7 +3,7 @@ const storeKey = "finporyadok.state.alzex.v1";
   try { localStorage.removeItem(legacyKey); } catch {}
 });
 const seedRows = window.ANDROMONEY_DATA?.rows || [];
-const CURRENT_SCHEMA_VERSION = 8;
+const CURRENT_SCHEMA_VERSION = 9;
 const savedState = loadState();
 
 const state = {
@@ -110,6 +110,12 @@ function migrateStoredState(raw) {
     saved.importRules = Array.isArray(saved.importRules) ? saved.importRules : [];
     saved.reconciliationReviewed = saved.reconciliationReviewed && typeof saved.reconciliationReviewed === "object" ? saved.reconciliationReviewed : {};
     version = 8;
+  }
+  if (version < 9) {
+    saved.savingsGoals = Array.isArray(saved.savingsGoals) ? saved.savingsGoals : [];
+    saved.savingsGoals.forEach((goal) => { if (!goal.memberId) goal.memberId = "family-tatiana"; });
+    saved.budgetPlans = Array.isArray(saved.budgetPlans) ? saved.budgetPlans : [];
+    version = 9;
   }
   saved.schemaVersion = CURRENT_SCHEMA_VERSION;
   return saved;
@@ -1399,7 +1405,11 @@ function currentFinanceFormProduct() {
     paymentDay: Number(data.paymentDay) || 10,
     capitalization: data.capitalization || "monthly",
     expenseCategory: data.expenseCategory || "Кредиты",
-    incomeCategory: data.incomeCategory || "Проценты по вкладам"
+    incomeCategory: data.incomeCategory || "Проценты по вкладам",
+    earlyRepaymentStrategy: data.earlyRepaymentStrategy || "reduceTerm",
+    loanInsuranceAnnual: Number(data.loanInsuranceAnnual) || 0,
+    autoProlongation: data.autoProlongation === "true",
+    depositTaxRate: Number(data.depositTaxRate) || 0
   };
 }
 
@@ -3749,6 +3759,7 @@ byId("financeProductForm")?.addEventListener("submit", (event) => {
   const existing = editingFinanceProductId ? state.financialProducts.find((item) => item.id === editingFinanceProductId) : null;
   product.id = existing?.id || `finance-${Date.now()}`;
   product.actualPayments = existing?.actualPayments || [];
+  product.depositMovements = existing?.depositMovements || [];
   if (product.type === "loan") {
     const paidPrincipal = product.actualPayments.reduce((sum, payment) => sum + Number(payment.principalPart || 0), 0);
     const enteredCurrentBalance = Number(event.currentTarget.elements.openingBalance.value);
@@ -4943,45 +4954,73 @@ renderCloudSyncStatus();renderCloudHistory();
 if(nativeCloudAvailable())setTimeout(()=>window.AndroidCloudSync.getCloudStatus(),300);
 
 
-// PACKAGE 7 — budgets, goals and cash forecast
-const planningMonthKey = "finporyadok.planning.month";
-function planningMonth(){ return localStorage.getItem(planningMonthKey) || new Date().toISOString().slice(0,7); }
-function monthBounds(ym){ const [y,m]=ym.split('-').map(Number); return [new Date(y,m-1,1), new Date(y,m,1)]; }
-function rowDateValue(row){ const d=new Date(row.date); return Number.isNaN(d.getTime())?null:d; }
-function rowsForPlanningMonth(){ const [a,b]=monthBounds(planningMonth()); return state.rows.filter(r=>{const d=rowDateValue(r);return d&&d>=a&&d<b;}); }
-function expenseValue(r){ return String(r.type||'').toLowerCase().includes('expense') || Number(r.amount)<0 ? Math.abs(Number(r.amount)||0) : 0; }
-function incomeValue(r){ return String(r.type||'').toLowerCase().includes('income') || Number(r.amount)>0 ? Math.max(0,Number(r.amount)||0) : 0; }
-function moneyText(v){ return `${Math.round(Number(v)||0).toLocaleString('ru-RU')} ₽`; }
+// PACKAGE 7/9 — budgets, goals, family privacy and cash forecast
+function planningMonth(){return byId('planningMonth')?.value||new Date().toISOString().slice(0,7);}
+function planningMember(){return activeFamilyMember();}
+function isPlanningAdmin(){return planningMember()?.role==='admin';}
+function visibleBudgetPlans(month){
+  const member=planningMember();
+  return state.budgetPlans.filter(p=>p.month===month && (member?.role==='admin' || (p.memberId||'family')===member?.id));
+}
+function visibleSavingsGoals(){
+  const member=planningMember();
+  return state.savingsGoals.filter(g=>member?.role==='admin' || (g.memberId||'family-tatiana')===member?.id);
+}
+function ownerName(ownerId){
+  if(ownerId==='family') return 'Вся семья';
+  return state.familyMembers.find(m=>m.id===ownerId)?.name||'Профиль';
+}
 function renderPlanning(){
-  const root=byId('planning'); if(!root) return;
-  const month=planningMonth(); const input=byId('planningMonth'); if(input&&input.value!==month) input.value=month;
-  const rows=rowsForPlanningMonth(); const income=rows.reduce((a,r)=>a+incomeValue(r),0), expense=rows.reduce((a,r)=>a+expenseValue(r),0);
-  const planned=state.budgetPlans.filter(x=>x.month===month).reduce((a,x)=>a+Number(x.limit||0),0);
-  const regular=typeof regularOccurrences==='function'?regularOccurrences().filter(x=>String(x.date||'').startsWith(month)&&!x.paid).reduce((a,x)=>a+Number(x.amount||0),0):0;
+  const month=planningMonth(); const rows=state.rows.filter(r=>String(r.date||'').slice(0,7)===month);
+  const income=rows.reduce((s,r)=>s+incomeValue(r),0), expense=rows.reduce((s,r)=>s+expenseValue(r),0);
+  const plans=visibleBudgetPlans(month); const planned=plans.reduce((s,p)=>s+Number(p.limit||0),0);
+  const regular=typeof regularOccurrences==='function'?regularOccurrences(new Date(month+'-01'),new Date(month+'-28')).reduce((s,x)=>s+Number(x.amount||0),0):0;
   const reserve=Number(state.forecastSettings.reserve||0); const forecast=income-expense-regular-reserve;
   if(byId('planningIncome')) byId('planningIncome').textContent=moneyText(income);
   if(byId('planningExpense')) byId('planningExpense').textContent=moneyText(expense);
   if(byId('planningAvailable')) byId('planningAvailable').textContent=moneyText(forecast);
   if(byId('planningAvailable')) byId('planningAvailable').className=forecast<0?'bad':'good';
   if(byId('planningMeta')) byId('planningMeta').textContent=`Лимиты: ${moneyText(planned)} · ожидаемые платежи: ${moneyText(regular)} · резерв: ${moneyText(reserve)}`;
-  const list=byId('budgetPlanList'); if(list){ const plans=state.budgetPlans.filter(x=>x.month===month); list.innerHTML=plans.length?plans.map(p=>{const ownerId=p.memberId||'family'; const owner=ownerId==='family'?null:state.familyMembers.find(m=>m.id===ownerId); const spent=rows.filter(r=>ownerId==='family'||r.memberId===ownerId).reduce((sum,r)=>sum+((r.category||'Без категории')===p.category?expenseValue(r):0),0); const pct=p.limit?Math.min(999,Math.round(spent/p.limit*100)):0; const ownerLabel=owner?` · ${escapeHtml(owner.name)}`:' · Вся семья'; return `<article class="budget-plan-card" data-budget-id="${escapeHtml(p.id)}"><div><strong>${escapeHtml(p.category)}</strong><small>${moneyText(spent)} из ${moneyText(p.limit)}${ownerLabel}</small></div><div class="budget-progress"><i style="width:${Math.min(100,pct)}%"></i></div><span class="${pct>100?'bad':pct>80?'warn':'good'}">${pct}%</span><button data-budget-open="${escapeHtml(p.category)}" data-budget-member="${escapeHtml(ownerId)}" type="button">Операции</button><button data-budget-delete="${escapeHtml(p.id)}" type="button">×</button></article>`}).join(''):'<article class="empty-state"><strong>Лимиты не заданы</strong><p>Добавьте бюджет по категории на выбранный месяц.</p></article>'; }
-  const goals=byId('savingsGoalList'); if(goals){ goals.innerHTML=state.savingsGoals.length?state.savingsGoals.map(g=>{const current=Number(g.current||0), target=Number(g.target||0), pct=target?Math.min(100,Math.round(current/target*100)):0; return `<article class="goal-card"><div><strong>${escapeHtml(g.name)}</strong><small>${moneyText(current)} из ${moneyText(target)}${g.deadline?` · до ${escapeHtml(g.deadline)}`:''}</small></div><div class="budget-progress"><i style="width:${pct}%"></i></div><span>${pct}%</span><button data-goal-add="${escapeHtml(g.id)}" type="button">Пополнить</button><button data-goal-delete="${escapeHtml(g.id)}" type="button">×</button></article>`}).join(''):'<article class="empty-state"><strong>Целей пока нет</strong><p>Создайте резервный фонд или цель для крупной покупки.</p></article>'; }
+  const list=byId('budgetPlanList');
+  if(list){ list.innerHTML=plans.length?plans.map(p=>{
+    const ownerId=p.memberId||'family'; const spent=rows.filter(r=>ownerId==='family'||r.memberId===ownerId).reduce((sum,r)=>sum+((r.category||'Без категории')===p.category?expenseValue(r):0),0);
+    const pct=p.limit?Math.min(999,Math.round(spent/p.limit*100)):0; const ownerLabel=` · ${escapeHtml(ownerName(ownerId))}`;
+    return `<article class="budget-plan-card" data-budget-id="${escapeHtml(p.id)}"><div><strong>${escapeHtml(p.category)}</strong><small>${moneyText(spent)} из ${moneyText(p.limit)}${ownerLabel}</small></div><div class="budget-progress"><i style="width:${Math.min(100,pct)}%"></i></div><span class="${pct>100?'bad':pct>80?'warn':'good'}">${pct}%</span><button data-budget-open="${escapeHtml(p.category)}" data-budget-member="${escapeHtml(ownerId)}" type="button">Операции</button><button data-budget-delete="${escapeHtml(p.id)}" type="button">×</button></article>`;
+  }).join(''):'<article class="empty-state"><strong>Лимиты не заданы</strong><p>Добавьте бюджет по категории на выбранный месяц.</p></article>'; }
+  const visibleGoals=visibleSavingsGoals(); const goals=byId('savingsGoalList');
+  if(goals){ goals.innerHTML=visibleGoals.length?visibleGoals.map(g=>{
+    const current=Number(g.current||0), target=Number(g.target||0), pct=target?Math.min(100,Math.round(current/target*100)):0; const owner=ownerName(g.memberId||'family-tatiana');
+    return `<article class="goal-card"><div><strong>${escapeHtml(g.name)}</strong><small>${moneyText(current)} из ${moneyText(target)} · ${escapeHtml(owner)}${g.deadline?` · до ${escapeHtml(g.deadline)}`:''}</small></div><div class="budget-progress"><i style="width:${pct}%"></i></div><span>${pct}%</span><button data-goal-add="${escapeHtml(g.id)}" type="button">Пополнить</button><button data-goal-delete="${escapeHtml(g.id)}" type="button">×</button></article>`;
+  }).join(''):'<article class="empty-state"><strong>Целей пока нет</strong><p>Создайте цель для накоплений.</p></article>'; }
+  const reservePanel=byId('forecastReserve')?.closest('.forecast-settings'); if(reservePanel) reservePanel.hidden=!isPlanningAdmin();
 }
 byId('planningMonth')?.addEventListener('change',e=>{localStorage.setItem(planningMonthKey,e.target.value);renderPlanning();});
 function populateBudgetPlanSelectors(){
-  const category=byId('budgetPlanCategory');
-  if(category){ const names=categoryNamesByType('expense'); category.innerHTML='<option value="">Выберите категорию</option>'+names.map(name=>`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join(''); }
-  const member=byId('budgetPlanMember');
-  if(member){ member.innerHTML='<option value="family">Вся семья</option>'+state.familyMembers.map(item=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.role==='child'?' — ребёнок':''}</option>`).join(''); }
+  const category=byId('budgetPlanCategory'); if(category){ const names=categoryNamesByType('expense'); category.innerHTML='<option value="">Выберите категорию</option>'+names.map(name=>`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join(''); }
+  const member=byId('budgetPlanMember'); const current=planningMember();
+  if(member){
+    if(current?.role==='admin'){ member.innerHTML='<option value="family">Вся семья</option>'+state.familyMembers.map(item=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.role==='child'?' — ребёнок':''}</option>`).join(''); member.disabled=false; }
+    else { member.innerHTML=`<option value="${escapeHtml(current?.id||'')}">${escapeHtml(current?.name||'Мой профиль')}</option>`; member.disabled=true; }
+  }
+}
+function populateSavingsGoalOwner(){
+  const owner=byId('savingsGoalMember'); const current=planningMember(); if(!owner)return;
+  if(current?.role==='admin'){ owner.innerHTML=state.familyMembers.map(item=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.role==='child'?' — ребёнок':''}</option>`).join(''); owner.disabled=false; owner.value=current.id; }
+  else { owner.innerHTML=`<option value="${escapeHtml(current?.id||'')}">${escapeHtml(current?.name||'Мой профиль')}</option>`; owner.disabled=true; }
 }
 byId('addBudgetPlanBtn')?.addEventListener('click',()=>{populateBudgetPlanSelectors();byId('budgetPlanDialog')?.showModal();});
-byId('budgetPlanForm')?.addEventListener('submit',e=>{e.preventDefault();const f=new FormData(e.target);const category=String(f.get('category')||'').trim();if(!category)return;state.budgetPlans.push({id:`budget-${Date.now()}`,month:planningMonth(),category,memberId:String(f.get('memberId')||'family'),limit:Number(f.get('limit')||0),rollover:Boolean(f.get('rollover'))});saveState();e.target.reset();byId('budgetPlanDialog')?.close();renderPlanning();});
-byId('addSavingsGoalBtn')?.addEventListener('click',()=>byId('savingsGoalDialog')?.showModal());
-byId('savingsGoalForm')?.addEventListener('submit',e=>{e.preventDefault();const f=new FormData(e.target);state.savingsGoals.push({id:`goal-${Date.now()}`,name:String(f.get('name')||'Цель'),target:Number(f.get('target')||0),current:Number(f.get('current')||0),deadline:String(f.get('deadline')||''),account:String(f.get('account')||'')});saveState();e.target.reset();byId('savingsGoalDialog')?.close();renderPlanning();});
-byId('forecastReserve')?.addEventListener('change',e=>{state.forecastSettings.reserve=Number(e.target.value||0);saveState();renderPlanning();});
-document.addEventListener('click',e=>{const b=e.target.closest('[data-budget-delete]');if(b){state.budgetPlans=state.budgetPlans.filter(x=>x.id!==b.dataset.budgetDelete);saveState();renderPlanning();}const g=e.target.closest('[data-goal-delete]');if(g){state.savingsGoals=state.savingsGoals.filter(x=>x.id!==g.dataset.goalDelete);saveState();renderPlanning();}const a=e.target.closest('[data-goal-add]');if(a){const goal=state.savingsGoals.find(x=>x.id===a.dataset.goalAdd);if(goal){const v=Number(prompt('Сумма пополнения', '0')||0);if(v){goal.current=Number(goal.current||0)+v;saveState();renderPlanning();}}}const o=e.target.closest('[data-budget-open]');if(o&&typeof openDrilldown==='function')openDrilldown('category',o.dataset.budgetOpen);});
+byId('budgetPlanForm')?.addEventListener('submit',e=>{e.preventDefault();const f=new FormData(e.target);const current=planningMember();const category=String(f.get('category')||'').trim();if(!category)return;const memberId=current?.role==='admin'?String(f.get('memberId')||'family'):current?.id;state.budgetPlans.push({id:`budget-${Date.now()}`,month:planningMonth(),category,memberId,limit:Number(f.get('limit')||0),rollover:Boolean(f.get('rollover'))});saveState();e.target.reset();byId('budgetPlanDialog')?.close();renderPlanning();});
+byId('addSavingsGoalBtn')?.addEventListener('click',()=>{populateSavingsGoalOwner();byId('savingsGoalDialog')?.showModal();});
+byId('savingsGoalForm')?.addEventListener('submit',e=>{e.preventDefault();const f=new FormData(e.target);const current=planningMember();const memberId=current?.role==='admin'?String(f.get('memberId')||current.id):current?.id;state.savingsGoals.push({id:`goal-${Date.now()}`,name:String(f.get('name')||'Цель'),target:Number(f.get('target')||0),current:Number(f.get('current')||0),deadline:String(f.get('deadline')||''),account:String(f.get('account')||''),memberId});saveState();e.target.reset();byId('savingsGoalDialog')?.close();renderPlanning();});
+byId('forecastReserve')?.addEventListener('change',e=>{if(!isPlanningAdmin())return;state.forecastSettings.reserve=Number(e.target.value||0);saveState();renderPlanning();});
+document.addEventListener('click',e=>{
+  const current=planningMember();
+  const b=e.target.closest('[data-budget-delete]'); if(b){const item=state.budgetPlans.find(x=>x.id===b.dataset.budgetDelete);if(item&&(current?.role==='admin'||item.memberId===current?.id)){state.budgetPlans=state.budgetPlans.filter(x=>x.id!==b.dataset.budgetDelete);saveState();renderPlanning();}}
+  const g=e.target.closest('[data-goal-delete]'); if(g){const item=state.savingsGoals.find(x=>x.id===g.dataset.goalDelete);if(item&&(current?.role==='admin'||item.memberId===current?.id)){state.savingsGoals=state.savingsGoals.filter(x=>x.id!==g.dataset.goalDelete);saveState();renderPlanning();}}
+  const a=e.target.closest('[data-goal-add]'); if(a){const goal=state.savingsGoals.find(x=>x.id===a.dataset.goalAdd);if(goal&&(current?.role==='admin'||goal.memberId===current?.id)){const v=Number(prompt('Сумма пополнения', '0')||0);if(v){goal.current=Number(goal.current||0)+v;saveState();renderPlanning();}}}
+  const o=e.target.closest('[data-budget-open]');if(o&&typeof openDrilldown==='function')openDrilldown('category',o.dataset.budgetOpen);
+});
 renderPlanning();
-
 
 // PACKAGE 8 — reconciliation and smart import rules
 function normalizeRuleText(v){return String(v||'').trim().toLowerCase().replace(/\s+/g,' ');}
@@ -5004,3 +5043,47 @@ byId('importRuleForm')?.addEventListener('submit',e=>{e.preventDefault();const f
 byId('applyAllImportRulesBtn')?.addEventListener('click',()=>{let total=0;state.importRules.forEach(r=>total+=applyImportRule(r));alert(`Обновлено операций: ${total}`);});
 document.addEventListener('click',e=>{const rr=e.target.closest('[data-rule-run]');if(rr){const r=state.importRules.find(x=>x.id===rr.dataset.ruleRun);if(r)alert(`Обновлено операций: ${applyImportRule(r)}`);}const rd=e.target.closest('[data-rule-delete]');if(rd){state.importRules=state.importRules.filter(x=>x.id!==rd.dataset.ruleDelete);saveState();renderReconciliationCenter();}const rv=e.target.closest('[data-reconcile-reviewed]');if(rv){state.reconciliationReviewed[rv.dataset.reconcileReviewed]=new Date().toISOString();saveState();renderReconciliationCenter();}const ro=e.target.closest('[data-reconcile-open]');if(ro){const row=state.rows.find(x=>x.id===ro.dataset.reconcileOpen);if(row&&typeof openDrilldown==='function')openDrilldown('row',row.id);}});
 renderReconciliationCenter();
+
+
+// Package 9 — completion of loans, deposits and subscriptions
+function pkg9DateAddMonths(dateText, count){return addMonthsSafe(dateText,count,new Date(`${dateText}T00:00:00`).getDate());}
+function pkg9LoanSchedule(product){
+  const rows=[]; let balance=loanRemaining(product); const monthlyRate=ratePerMonth(product); const originalCalc=calculateLoan({...product,principal:balance,openingBalance:balance});
+  let payment=Number(product.monthlyPaymentOverride)||originalCalc.monthlyPayment; const actual=[...loanActualPayments(product)].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const start=product.startDate||dateLocal(new Date()); const max=Math.max(1,Number(product.termMonths)||1); let totalInterest=0;
+  for(let i=1;i<=max && balance>0.01;i++){
+    const date=addMonthsSafe(start,i,product.paymentDay); const interest=product.rateMode==='period'?0:balance*monthlyRate;
+    let principal=Math.max(0,Math.min(balance,payment-interest));
+    const periodActual=actual.filter(x=>(x.date||'').slice(0,7)===date.slice(0,7));
+    const earlyPrincipal=periodActual.filter(x=>x.paymentKind==='early').reduce((s,x)=>s+Number(x.principalPart||x.amount||0),0);
+    principal=Math.min(balance,principal+earlyPrincipal); const amount=Math.min(balance+interest,payment+earlyPrincipal); balance=Math.max(0,balance-principal); totalInterest+=interest;
+    rows.push({index:i,date,amount,principal,interest,balance,hasActual:periodActual.length>0});
+    if(earlyPrincipal>0 && product.earlyRepaymentStrategy==='reducePayment' && balance>0){const left=Math.max(1,max-i); payment=monthlyRate?balance*monthlyRate*Math.pow(1+monthlyRate,left)/(Math.pow(1+monthlyRate,left)-1):balance/left;}
+  }
+  return {rows,totalInterest,finishDate:rows.at(-1)?.date||start,payment};
+}
+function pkg9DepositMovements(product){return Array.isArray(product.depositMovements)?product.depositMovements:[];}
+function pkg9DepositBalance(product){return Math.max(0,Number(product.principal||0)+pkg9DepositMovements(product).reduce((s,x)=>s+(x.movementType==='withdrawal'?-1:1)*Number(x.amount||0),0));}
+function pkg9DepositProjection(product){const balance=pkg9DepositBalance(product);const calc=calculateDeposit({...product,principal:balance});const tax=Math.max(0,calc.interest*(Number(product.depositTaxRate||0)/100));return {...calc,balance,tax,netMaturity:calc.maturity-tax};}
+function pkg9FrequencyMonths(f){return f==='yearly'?12:f==='halfyear'?6:f==='quarterly'?3:1;}
+function pkg9SubscriptionMonthly(t){return Number(t.amount||0)/pkg9FrequencyMonths(t.frequency||'monthly');}
+function pkg9Subscriptions(){return state.regularPayments.filter(x=>x.paymentType==='subscription');}
+function pkg9RenderSubscriptions(){
+  const target=byId('subscriptionCards'); if(!target)return; const subs=pkg9Subscriptions(); const active=subs.filter(x=>(x.subscriptionStatus||'active')==='active'); const today=dateLocal(new Date()); const soon=addMonthsSafe(today,1,new Date().getDate());
+  byId('subscriptionMonthlyTotal').textContent=money(active.reduce((s,x)=>s+pkg9SubscriptionMonthly(x),0)); byId('subscriptionAnnualTotal').textContent=money(active.reduce((s,x)=>s+pkg9SubscriptionMonthly(x)*12,0)); byId('subscriptionActiveCount').textContent=`${active.length} активных`;
+  const upcoming=active.filter(x=>x.startDate&&x.startDate>=today&&x.startDate<=soon); byId('subscriptionUpcomingTotal').textContent=money(upcoming.reduce((s,x)=>s+Number(x.amount||0),0)); byId('subscriptionUpcomingCount').textContent=`${upcoming.length} подписок`;
+  target.innerHTML=subs.length?subs.map(t=>{const status=t.subscriptionStatus||'active';const trial=t.trialEndDate&&t.trialEndDate>=today?`Пробный период до ${formatTransactionDate(t.trialEndDate)}`:'';const history=Array.isArray(t.priceHistory)?t.priceHistory:[];const old=history.at(-1);return `<article class="finance-product-card subscription-card"><div class="finance-product-card-head"><div><span class="finance-product-type ${status==='canceled'?'deposit':'loan'}">${status==='active'?'Активна':status==='paused'?'Пауза':'Отменена'}</span><h3>${escapeHtml(t.name)}</h3><p>${escapeHtml(t.payee||'Сервис')} • ${t.startDate?`следующее ${formatTransactionDate(t.startDate)}`:'дата не задана'}</p></div><button class="icon-button edit-subscription" data-subscription-id="${escapeHtml(t.id)}">✏️</button></div><div class="finance-product-values"><div><span>Тариф</span><strong>${money(t.amount)}</strong></div><div><span>За год</span><strong>${money(pkg9SubscriptionMonthly(t)*12)}</strong></div>${trial?`<div><span>Пробный период</span><strong>${escapeHtml(trial)}</strong></div>`:''}${old?`<div><span>Предыдущая цена</span><strong>${money(old.amount)}</strong></div>`:''}</div></article>`}).join(''):`<article class="empty-state"><strong>Подписок нет</strong><p>Добавьте сервис, чтобы контролировать списания и пробные периоды.</p></article>`;
+}
+const pkg9BaseRenderFinanceProducts=renderFinanceProducts;
+renderFinanceProducts=function(){pkg9BaseRenderFinanceProducts();pkg9RenderSubscriptions();document.querySelectorAll('.finance-product-card').forEach(card=>{const del=card.querySelector('.delete-finance-product');if(del&&!card.querySelector('.open-finance-product-details')){const b=document.createElement('button');b.className='ghost open-finance-product-details';b.dataset.productId=del.dataset.productId;b.textContent='Подробнее';card.querySelector('.finance-product-card-head').appendChild(b);}});};
+function pkg9OpenProductDetails(product){
+  const dlg=byId('financeProductDetailsDialog');byId('financeProductDetailsTitle').textContent=product.name;byId('financeProductDetailsSubtitle').textContent=product.type==='loan'?'График, план и фактические платежи':'Движения, проценты и прогноз';
+  if(product.type==='loan'){const schedule=pkg9LoanSchedule(product);const actual=loanActualPayments(product);byId('financeProductDetailsBody').innerHTML=`<div class="finance-detail-actions"><button class="primary add-loan-payment" data-product-id="${escapeHtml(product.id)}">+ Платёж</button><button class="ghost edit-finance-product" data-product-id="${escapeHtml(product.id)}">Изменить условия</button></div><div class="finance-metrics"><article class="metric-card"><span>Остаток</span><strong>${money(loanRemaining(product))}</strong><small>основной долг</small></article><article class="metric-card"><span>Прогноз закрытия</span><strong>${formatTransactionDate(schedule.finishDate)}</strong><small>${product.earlyRepaymentStrategy==='reducePayment'?'уменьшается платёж':'уменьшается срок'}</small></article><article class="metric-card"><span>Страховка в год</span><strong>${money(product.loanInsuranceAnnual||0)}</strong></article></div><div class="table-scroll"><table class="finance-schedule-table"><thead><tr><th>№</th><th>Дата</th><th>Платёж</th><th>Проценты</th><th>Основной долг</th><th>Остаток</th></tr></thead><tbody>${schedule.rows.map(r=>`<tr class="${r.hasActual?'is-paid':''}"><td>${r.index}</td><td>${formatTransactionDate(r.date)}</td><td>${money(r.amount)}</td><td>${money(r.interest)}</td><td>${money(r.principal)}</td><td>${money(r.balance)}</td></tr>`).join('')}</tbody></table></div><h3>Фактические платежи</h3>${actual.length?actual.map(x=>`<article class="planned-payment-row"><div><strong>${formatTransactionDate(x.date)} • ${x.paymentKind==='early'?'Досрочный':'Плановый'}</strong><small>Основной долг ${money(x.principalPart||0)} • проценты ${money(x.interestPart||0)}</small></div><b>${money(x.amount)}</b></article>`).join(''):'<p class="muted">Фактических платежей пока нет.</p>'}`;
+  }else{const p=pkg9DepositProjection(product),mov=pkg9DepositMovements(product);byId('financeProductDetailsBody').innerHTML=`<div class="finance-detail-actions"><button class="primary add-deposit-movement" data-product-id="${escapeHtml(product.id)}">+ Операция</button><button class="ghost edit-finance-product" data-product-id="${escapeHtml(product.id)}">Изменить условия</button></div><div class="finance-metrics"><article class="metric-card"><span>Текущая сумма</span><strong>${money(p.balance)}</strong></article><article class="metric-card"><span>Прогноз к окончанию</span><strong>${money(p.netMaturity)}</strong><small>после указанного налога</small></article><article class="metric-card"><span>Доход</span><strong>${money(p.interest)}</strong><small>налог ${money(p.tax)}</small></article></div><p class="muted">Автопролонгация: ${product.autoProlongation?'включена':'выключена'}.</p><h3>История движений</h3>${mov.length?mov.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(x=>`<article class="planned-payment-row"><div><strong>${formatTransactionDate(x.date)} • ${x.movementType==='contribution'?'Пополнение':x.movementType==='withdrawal'?'Снятие':'Проценты'}</strong><small>${escapeHtml(x.comment||'')}</small></div><b>${x.movementType==='withdrawal'?'-':'+'}${money(x.amount)}</b></article>`).join(''):'<p class="muted">Движений пока нет.</p>'}`;}dlg.showModal();
+}
+function pkg9OpenSubscription(t=null){const f=byId('subscriptionForm');f.reset();f.elements.subscriptionId.value=t?.id||'';f.elements.startDate.value=t?.startDate||dateLocal(new Date());f.elements.remindDays.value=t?.remindDays??3;byId('subscriptionCategorySelect').innerHTML=categoryNamesByType('expense').map(x=>`<option>${escapeHtml(x)}</option>`).join('');byId('subscriptionAccountSelect').innerHTML='<option value="">Не указан</option>'+state.accounts.map(x=>`<option>${escapeHtml(x.name)}</option>`).join('');if(t)Object.entries(t).forEach(([k,v])=>{if(f.elements[k])f.elements[k].value=typeof v==='boolean'?String(v):v??'';});byId('deleteSubscriptionBtn').hidden=!t;byId('subscriptionDialog').showModal();}
+document.addEventListener('click',e=>{const d=e.target.closest('.open-finance-product-details');if(d){const p=state.financialProducts.find(x=>x.id===d.dataset.productId);if(p)pkg9OpenProductDetails(p);return;}const dm=e.target.closest('.add-deposit-movement');if(dm){const f=byId('depositMovementForm');f.reset();f.elements.productId.value=dm.dataset.productId;f.elements.date.value=dateLocal(new Date());const candidates=state.rows.slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,100);byId('depositTransactionSelect').innerHTML='<option value="">Не связывать</option>'+candidates.map(r=>`<option value="${escapeHtml(r.id)}">${formatTransactionDate(r.date)} • ${escapeHtml(r.description)} • ${money(Math.abs(r.amount))}</option>`).join('');byId('depositMovementDialog').showModal();return;}const es=e.target.closest('.edit-subscription');if(es){pkg9OpenSubscription(state.regularPayments.find(x=>x.id===es.dataset.subscriptionId));return;}});
+byId('addSubscriptionBtn')?.addEventListener('click',()=>pkg9OpenSubscription());
+byId('depositMovementForm')?.addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());const p=state.financialProducts.find(x=>x.id===d.productId);if(!p)return;p.depositMovements=[...pkg9DepositMovements(p),{id:`deposit-move-${Date.now()}`,date:d.date,movementType:d.movementType,amount:Number(d.amount)||0,transactionId:d.transactionId||'',comment:d.comment||''}];saveState();byId('depositMovementDialog').close();render();pkg9OpenProductDetails(p);});
+byId('subscriptionForm')?.addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());const existing=state.regularPayments.find(x=>x.id===d.subscriptionId);const history=Array.isArray(existing?.priceHistory)?[...existing.priceHistory]:[];if(existing&&Number(existing.amount)!==Number(d.amount))history.push({date:dateLocal(new Date()),amount:Number(existing.amount)||0});const obj={...(existing||{}),id:existing?.id||`regular-${Date.now()}`,name:d.name,paymentType:'subscription',amount:Number(d.amount)||0,frequency:d.frequency,startDate:d.startDate,endDate:'',category:d.category||'Подписки',account:d.account||'',project:'',payee:d.payee||'',remindDays:Number(d.remindDays)||0,autoPlan:true,trialEndDate:d.trialEndDate||'',subscriptionStatus:d.subscriptionStatus||'active',cancellationDate:d.cancellationDate||'',comment:d.comment||'',priceHistory:history};const i=state.regularPayments.findIndex(x=>x.id===obj.id);if(i>=0)state.regularPayments[i]=obj;else state.regularPayments.push(obj);saveState();byId('subscriptionDialog').close();render();setView('finance-products');});
+byId('deleteSubscriptionBtn')?.addEventListener('click',()=>{const id=byId('subscriptionForm').elements.subscriptionId.value;if(id&&confirm('Удалить подписку?')){state.regularPayments=state.regularPayments.filter(x=>x.id!==id);saveState();byId('subscriptionDialog').close();render();}});

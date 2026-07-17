@@ -1445,3 +1445,7 @@ body[data-family-role="child"] .admin-only{display:none!important}
 
 /* Package 8 */
 .reconciliation-center,.import-rules{margin-bottom:16px}.reconcile-row,.rule-row{display:grid;grid-template-columns:auto minmax(180px,1fr) auto auto;gap:10px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:14px}.reconcile-row small,.rule-row small{display:block;color:var(--muted);margin-top:4px}@media(max-width:700px){.reconcile-row,.rule-row{grid-template-columns:1fr auto}.reconcile-row .tag{grid-column:1/-1}}
+
+
+/* Package 9 — financial products */
+.finance-detail-actions{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}.table-scroll{overflow:auto;max-height:440px;border:1px solid var(--border);border-radius:14px}.finance-schedule-table{width:100%;border-collapse:collapse;min-width:720px}.finance-schedule-table th,.finance-schedule-table td{padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap}.finance-schedule-table th:first-child,.finance-schedule-table td:first-child,.finance-schedule-table th:nth-child(2),.finance-schedule-table td:nth-child(2){text-align:left}.finance-schedule-table tr.is-paid{background:rgba(33,150,83,.08)}.subscription-card .finance-product-values{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}.subscription-metrics{margin-bottom:14px}.muted{color:var(--muted)}
