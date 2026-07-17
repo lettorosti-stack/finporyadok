@@ -1449,3 +1449,25 @@ body[data-family-role="child"] .admin-only{display:none!important}
 
 /* Package 9 — financial products */
 .finance-detail-actions{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}.table-scroll{overflow:auto;max-height:440px;border:1px solid var(--border);border-radius:14px}.finance-schedule-table{width:100%;border-collapse:collapse;min-width:720px}.finance-schedule-table th,.finance-schedule-table td{padding:9px 10px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap}.finance-schedule-table th:first-child,.finance-schedule-table td:first-child,.finance-schedule-table th:nth-child(2),.finance-schedule-table td:nth-child(2){text-align:left}.finance-schedule-table tr.is-paid{background:rgba(33,150,83,.08)}.subscription-card .finance-product-values{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}.subscription-metrics{margin-bottom:14px}.muted{color:var(--muted)}
+
+
+.finance-closure-panel{border:1px solid rgba(16,185,129,.28);background:linear-gradient(135deg,#ecfdf5,#f0fdfa 55%,#fffbeb)}
+.finance-closure-celebration{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center;padding:16px;border-radius:20px;background:rgba(255,255,255,.72);box-shadow:0 12px 30px rgba(15,118,110,.08)}
+.finance-closure-celebration strong{display:block;font-size:1.05rem;color:#065f46;margin-bottom:4px}
+.finance-closure-celebration p{margin:0;color:#36665b;line-height:1.45}
+.celebration-icon{font-size:2rem}
+@media (max-width:720px){.finance-closure-celebration{grid-template-columns:auto 1fr}.finance-closure-celebration .ghost{grid-column:1/-1;justify-self:start}}
+
+/* Пакет 10: имущество, документы и гарантии */
+.asset-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px;margin-top:16px}.asset-card{background:var(--panel,#fff);border:1px solid var(--line,#dbe5ea);border-radius:18px;padding:16px;display:grid;gap:12px}.asset-card-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.asset-kind{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}.asset-card h3{margin:4px 0}.asset-card p{margin:0;color:var(--muted)}.asset-values{display:grid;grid-template-columns:1fr 1fr;gap:10px}.asset-values div{background:var(--soft,#f4f7f8);border-radius:12px;padding:10px}.asset-values span,.asset-values small{display:block;color:var(--muted);font-size:12px}.asset-values strong{display:block;margin-top:3px}.asset-deadlines{display:flex;flex-wrap:wrap;gap:7px}.asset-deadline{padding:6px 9px;border-radius:999px;background:var(--soft,#f4f7f8);font-size:12px}.asset-deadline.due{background:#fff0e8;color:#9d3b12}.asset-actions{display:flex;gap:8px;flex-wrap:wrap}.asset-detail-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}.asset-detail-grid>div{background:var(--soft,#f4f7f8);padding:11px;border-radius:12px}.asset-detail-grid span{display:block;font-size:12px;color:var(--muted)}.asset-doc-list{display:grid;gap:8px;margin-top:10px}.asset-doc-row{display:flex;justify-content:space-between;gap:10px;align-items:center;border:1px solid var(--line,#dbe5ea);border-radius:12px;padding:10px}.asset-doc-actions{display:flex;gap:6px}.asset-dialog,.asset-details-dialog,.asset-document-dialog{max-width:720px;width:min(94vw,720px)}@media(max-width:680px){.asset-grid{grid-template-columns:1fr}.asset-values{grid-template-columns:1fr}.metric-grid.four{grid-template-columns:1fr 1fr}}
+
+/* Package 10.1 — links between property, utilities and loans */
+.asset-link-section{border:1px solid var(--border,#dbe4ea);border-radius:16px;padding:14px;background:var(--soft,#f7fafb)}
+.asset-link-checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}
+.asset-link-check{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--border,#dbe4ea);border-radius:12px;background:var(--card,#fff)}
+.asset-link-check input{margin-top:3px}
+.asset-linked-block{margin:16px 0;padding:14px;border:1px solid var(--border,#dbe4ea);border-radius:16px}
+.asset-linked-row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border,#e5ecef)}
+.asset-linked-row:last-child{border-bottom:0}
+.asset-linked-row small{display:block;color:var(--muted,#65727a);margin-top:3px}
+@media(max-width:640px){.asset-link-checks{grid-template-columns:1fr}.asset-linked-row{align-items:flex-start;flex-direction:column}}

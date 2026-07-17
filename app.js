@@ -3,7 +3,7 @@ const storeKey = "finporyadok.state.alzex.v1";
   try { localStorage.removeItem(legacyKey); } catch {}
 });
 const seedRows = window.ANDROMONEY_DATA?.rows || [];
-const CURRENT_SCHEMA_VERSION = 9;
+const CURRENT_SCHEMA_VERSION = 10;
 const savedState = loadState();
 
 const state = {
@@ -27,6 +27,7 @@ const state = {
   forecastSettings: savedState.forecastSettings && typeof savedState.forecastSettings === "object" ? savedState.forecastSettings : { reserve: 0, horizonDays: 30 },
   importRules: Array.isArray(savedState.importRules) ? savedState.importRules : [],
   reconciliationReviewed: savedState.reconciliationReviewed && typeof savedState.reconciliationReviewed === "object" ? savedState.reconciliationReviewed : {},
+  assets: Array.isArray(savedState.assets) ? savedState.assets : [],
   shopping: savedState.shopping.length ? savedState.shopping : [
     { name: "Молоко", qty: "2 л", days: 4, price: 92 },
     { name: "Корм", qty: "3 кг", days: 26, price: 1450 },
@@ -55,6 +56,7 @@ const views = {
   reports: ["Отчеты", "Категории, проекты, доходы, расходы и экспорт."],
   import: ["Импорт", "Загрузка CSV, предпросмотр и подготовка к проверке."],
   planning: ["Бюджет и цели", "Лимиты, накопления и прогноз остатка денег."],
+  assets: ["Имущество и документы", "Недвижимость, автомобили, техника, гарантии и сроки обслуживания."],
   settings: ["Настройки", "Офлайн-режим, синхронизация и безопасность."]
 };
 
@@ -117,6 +119,14 @@ function migrateStoredState(raw) {
     saved.budgetPlans = Array.isArray(saved.budgetPlans) ? saved.budgetPlans : [];
     version = 9;
   }
+  if (version < 10) {
+    saved.assets = Array.isArray(saved.assets) ? saved.assets : [];
+    saved.assets.forEach((asset) => {
+      if (!asset.ownerMemberId) asset.ownerMemberId = "family-tatiana";
+      if (!Array.isArray(asset.documents)) asset.documents = [];
+    });
+    version = 10;
+  }
   saved.schemaVersion = CURRENT_SCHEMA_VERSION;
   return saved;
 }
@@ -169,10 +179,11 @@ function loadState() {
       savingsGoals: Array.isArray(saved?.savingsGoals) ? saved.savingsGoals : [],
       forecastSettings: saved?.forecastSettings && typeof saved.forecastSettings === "object" ? saved.forecastSettings : { reserve: 0, horizonDays: 30 },
       importRules: Array.isArray(saved?.importRules) ? saved.importRules : [],
-      reconciliationReviewed: saved?.reconciliationReviewed && typeof saved.reconciliationReviewed === "object" ? saved.reconciliationReviewed : {}
+      reconciliationReviewed: saved?.reconciliationReviewed && typeof saved.reconciliationReviewed === "object" ? saved.reconciliationReviewed : {},
+      assets: Array.isArray(saved?.assets) ? saved.assets : []
     };
   } catch {}
-  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], shoppingAliases: {}, financialProducts: [], insurancePolicies: [], alimonyRules: [], regularPayments: [], plannedPaymentStates: {}, familyMembers: [], activeMemberId: "family-tatiana", familyActivityLog: [], budgetPlans: [], savingsGoals: [], forecastSettings: { reserve: 0, horizonDays: 30 }, importRules: [], reconciliationReviewed: {} };
+  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], shoppingAliases: {}, financialProducts: [], insurancePolicies: [], alimonyRules: [], regularPayments: [], plannedPaymentStates: {}, familyMembers: [], activeMemberId: "family-tatiana", familyActivityLog: [], budgetPlans: [], savingsGoals: [], forecastSettings: { reserve: 0, horizonDays: 30 }, importRules: [], reconciliationReviewed: {}, assets: [] };
 }
 
 function saveState() {
@@ -201,7 +212,8 @@ function saveState() {
     savingsGoals: state.savingsGoals,
     forecastSettings: state.forecastSettings,
     importRules: state.importRules,
-    reconciliationReviewed: state.reconciliationReviewed
+    reconciliationReviewed: state.reconciliationReviewed,
+    assets: state.assets
   }));
   localStorage.setItem(`${storeKey}.lastSavedAt`, savedAt);
   updateDatabaseStatus();
@@ -787,6 +799,58 @@ function renderLoanAlerts() {
 }
 
 
+
+function financeProductClosureEvents() {
+  const today = dateLocal(new Date());
+  return state.financialProducts.map((product) => {
+    const endDate = product.type === "loan"
+      ? (pkg9LoanSchedule(product).finishDate || addMonthsSafe(product.startDate, Number(product.termMonths) || 1))
+      : addMonthsSafe(product.startDate, Number(product.termMonths) || 1);
+    const due = new Date(`${endDate}T00:00:00`);
+    const now = new Date(`${today}T00:00:00`);
+    const daysLeft = Math.round((due - now) / 86400000);
+    return { ...product, endDate, daysLeft };
+  });
+}
+
+function financeProductMaturityReminders() {
+  return financeProductClosureEvents()
+    .filter((item) => item.daysLeft === 3)
+    .sort((a, b) => a.endDate.localeCompare(b.endDate));
+}
+
+function financeProductClosureCelebrations() {
+  return financeProductClosureEvents()
+    .filter((item) => item.daysLeft === 0)
+    .sort((a, b) => a.endDate.localeCompare(b.endDate));
+}
+
+function renderFinanceProductMaturityAlerts() {
+  const target = byId("financeMaturityAlerts");
+  const countNode = byId("financeMaturityAlertCount");
+  if (!target || !countNode) return;
+  const items = financeProductMaturityReminders();
+  countNode.textContent = items.length;
+  target.innerHTML = items.length ? items.map((item) => {
+    const isLoan = item.type === "loan";
+    return `<article class="alert-card alert-card--warning"><div class="alert-card-copy"><strong>${escapeHtml(item.name)}</strong><small>${isLoan ? "Кредит" : "Вклад"} • ${escapeHtml(item.bank || "Банк не указан")}</small><p>${isLoan ? "Через 3 дня наступает дата закрытия кредита." : "Через 3 дня заканчивается срок вклада."} Проверьте условия закрытия, пролонгации и зачисления средств.</p></div><div class="alert-card-side"><span>${formatTransactionDate(item.endDate)}</span><button class="ghost open-finance-product-details" data-product-id="${escapeHtml(item.id)}" type="button">Подробнее</button></div></article>`;
+  }).join("") : `<article class="empty-state"><strong>Сроки под контролем</strong><p>Через 3 дня не заканчиваются вклады и кредиты.</p></article>`;
+}
+
+function renderFinanceClosureCelebration() {
+  const panel = byId("financeClosureCelebrationPanel");
+  const target = byId("financeClosureCelebration");
+  if (!panel || !target) return;
+  const items = financeProductClosureCelebrations();
+  panel.hidden = items.length === 0;
+  target.innerHTML = items.map((item) => {
+    const isLoan = item.type === "loan";
+    const title = isLoan ? "Сегодня закрывается кредит — ещё одна финансовая цель достигнута!" : "Сегодня завершается вклад — ваши деньги поработали на вас!";
+    const text = isLoan ? "Вы освободили часть будущего бюджета. Отличный повод направить её на новую цель или резерв." : "Проверьте зачисление суммы и процентов и решите, куда направить результат дальше.";
+    return `<article class="finance-closure-celebration"><div class="celebration-icon">${isLoan ? "🎉" : "✨"}</div><div><strong>${escapeHtml(title)}</strong><p>${escapeHtml(item.name)} • ${escapeHtml(text)}</p></div><button class="ghost open-finance-product-details" data-product-id="${escapeHtml(item.id)}" type="button">Открыть</button></article>`;
+  }).join("");
+}
+
 function utilityEventReminders() {
   const today = new Date(); today.setHours(0,0,0,0);
   return regularOccurrences().filter((item) => item.paymentType === 'utilities' && occurrenceStatus(item) !== 'paid').map((item) => {
@@ -809,7 +873,7 @@ function renderUtilityAlerts() {
 }
 
 function appNotificationCount() {
-  return insuranceReminderPolicies().length + loanPaymentReminders().length + utilityEventReminders().length + workExpenseRows(false).length;
+  return insuranceReminderPolicies().length + loanPaymentReminders().length + financeProductMaturityReminders().length + utilityEventReminders().length + workExpenseRows(false).length;
 }
 
 function renderNotificationCenterBadge() {
@@ -827,10 +891,13 @@ function render() {
   renderAccounts();
   renderBudgets();
   renderFinanceProducts();
+  renderAssets();
   renderRegularMoney();
   renderInsurance();
   renderInsuranceAlerts();
   renderLoanAlerts();
+  renderFinanceProductMaturityAlerts();
+  renderFinanceClosureCelebration();
   renderUtilityAlerts();
   renderWorkReimbursement();
   renderNotificationCenterBadge();
@@ -2218,6 +2285,7 @@ function setView(id) {
   if (id === "reimbursements") renderWorkExpenseCenter();
   if (id === "alimony") renderAlimony();
   if (id === "reports") renderReports();
+  if (id === "assets") renderAssets();
 }
 
 function parseCsvText(text) {
@@ -3844,6 +3912,7 @@ function buildBackupPayload() {
       importArchive: state.importArchive,
       shopping: state.shopping,
       financialProducts: state.financialProducts,
+      assets: state.assets,
       insurancePolicies: state.insurancePolicies,
       alimonyRules: state.alimonyRules
     }
@@ -3954,6 +4023,7 @@ function normalizeBackupPayload(parsed) {
     importArchive: Array.isArray(data.importArchive) ? data.importArchive : [],
     shopping: Array.isArray(data.shopping) ? data.shopping : [],
     financialProducts: Array.isArray(data.financialProducts) ? data.financialProducts : [],
+    assets: Array.isArray(data.assets) ? data.assets : [],
     insurancePolicies: Array.isArray(data.insurancePolicies) ? data.insurancePolicies : [],
     alimonyRules: Array.isArray(data.alimonyRules) ? data.alimonyRules : []
   };
@@ -3986,6 +4056,7 @@ function applyBackup(mode) {
     state.importArchive = pendingBackupRestore.importArchive;
     state.shopping = pendingBackupRestore.shopping;
     state.financialProducts = pendingBackupRestore.financialProducts;
+    state.assets = pendingBackupRestore.assets || [];
     state.insurancePolicies = pendingBackupRestore.insurancePolicies;
     state.alimonyRules = pendingBackupRestore.alimonyRules;
     state.officialSubsistenceData = pendingBackupRestore.officialSubsistenceData;
@@ -3996,6 +4067,7 @@ function applyBackup(mode) {
     state.importArchive = mergeUnique(state.importArchive, pendingBackupRestore.importArchive, (item) => item.id || JSON.stringify(item));
     state.shopping = mergeUnique(state.shopping, pendingBackupRestore.shopping, (item) => item.id || `${item.name}|${item.date}`);
     state.financialProducts = mergeUnique(state.financialProducts, pendingBackupRestore.financialProducts, (item) => item.id || `${item.type}|${item.name}|${item.startDate}`);
+    state.assets = mergeUnique(state.assets, pendingBackupRestore.assets || [], (item) => item.id || `${item.type}|${item.name}|${item.serialNumber || item.address || ""}`);
     state.insurancePolicies = mergeUnique(state.insurancePolicies, pendingBackupRestore.insurancePolicies, (item) => item.id || `${item.policyNumber}|${item.name}|${item.startDate}`);
     state.alimonyRules = mergeUnique(state.alimonyRules, pendingBackupRestore.alimonyRules, (item) => item.id || `${item.effectiveFrom}|${item.amountPerChild}`);
   }
@@ -4684,7 +4756,7 @@ function activeFamilyMember() {
 }
 function familyCanAccessView(member, viewId) {
   if (!member || member.role === "admin") return true;
-  return ["dashboard", "transactions", "accounts", "calendar", "shopping", "settings"].includes(viewId);
+  return ["dashboard", "transactions", "accounts", "calendar", "shopping", "assets", "settings"].includes(viewId);
 }
 function initializeFamilyOwnership() {
   if (!Array.isArray(state.familyMembers) || !state.familyMembers.length) return;
@@ -5082,8 +5154,224 @@ function pkg9OpenProductDetails(product){
   }else{const p=pkg9DepositProjection(product),mov=pkg9DepositMovements(product);byId('financeProductDetailsBody').innerHTML=`<div class="finance-detail-actions"><button class="primary add-deposit-movement" data-product-id="${escapeHtml(product.id)}">+ Операция</button><button class="ghost edit-finance-product" data-product-id="${escapeHtml(product.id)}">Изменить условия</button></div><div class="finance-metrics"><article class="metric-card"><span>Текущая сумма</span><strong>${money(p.balance)}</strong></article><article class="metric-card"><span>Прогноз к окончанию</span><strong>${money(p.netMaturity)}</strong><small>после указанного налога</small></article><article class="metric-card"><span>Доход</span><strong>${money(p.interest)}</strong><small>налог ${money(p.tax)}</small></article></div><p class="muted">Автопролонгация: ${product.autoProlongation?'включена':'выключена'}.</p><h3>История движений</h3>${mov.length?mov.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(x=>`<article class="planned-payment-row"><div><strong>${formatTransactionDate(x.date)} • ${x.movementType==='contribution'?'Пополнение':x.movementType==='withdrawal'?'Снятие':'Проценты'}</strong><small>${escapeHtml(x.comment||'')}</small></div><b>${x.movementType==='withdrawal'?'-':'+'}${money(x.amount)}</b></article>`).join(''):'<p class="muted">Движений пока нет.</p>'}`;}dlg.showModal();
 }
 function pkg9OpenSubscription(t=null){const f=byId('subscriptionForm');f.reset();f.elements.subscriptionId.value=t?.id||'';f.elements.startDate.value=t?.startDate||dateLocal(new Date());f.elements.remindDays.value=t?.remindDays??3;byId('subscriptionCategorySelect').innerHTML=categoryNamesByType('expense').map(x=>`<option>${escapeHtml(x)}</option>`).join('');byId('subscriptionAccountSelect').innerHTML='<option value="">Не указан</option>'+state.accounts.map(x=>`<option>${escapeHtml(x.name)}</option>`).join('');if(t)Object.entries(t).forEach(([k,v])=>{if(f.elements[k])f.elements[k].value=typeof v==='boolean'?String(v):v??'';});byId('deleteSubscriptionBtn').hidden=!t;byId('subscriptionDialog').showModal();}
-document.addEventListener('click',e=>{const d=e.target.closest('.open-finance-product-details');if(d){const p=state.financialProducts.find(x=>x.id===d.dataset.productId);if(p)pkg9OpenProductDetails(p);return;}const dm=e.target.closest('.add-deposit-movement');if(dm){const f=byId('depositMovementForm');f.reset();f.elements.productId.value=dm.dataset.productId;f.elements.date.value=dateLocal(new Date());const candidates=state.rows.slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,100);byId('depositTransactionSelect').innerHTML='<option value="">Не связывать</option>'+candidates.map(r=>`<option value="${escapeHtml(r.id)}">${formatTransactionDate(r.date)} • ${escapeHtml(r.description)} • ${money(Math.abs(r.amount))}</option>`).join('');byId('depositMovementDialog').showModal();return;}const es=e.target.closest('.edit-subscription');if(es){pkg9OpenSubscription(state.regularPayments.find(x=>x.id===es.dataset.subscriptionId));return;}});
-byId('addSubscriptionBtn')?.addEventListener('click',()=>pkg9OpenSubscription());
+document.addEventListener('click',e=>{const addSub=e.target.closest('#addSubscriptionBtn');if(addSub){e.preventDefault();pkg9OpenSubscription();return;}const d=e.target.closest('.open-finance-product-details');if(d){const p=state.financialProducts.find(x=>x.id===d.dataset.productId);if(p)pkg9OpenProductDetails(p);return;}const dm=e.target.closest('.add-deposit-movement');if(dm){const f=byId('depositMovementForm');f.reset();f.elements.productId.value=dm.dataset.productId;f.elements.date.value=dateLocal(new Date());const candidates=state.rows.slice().sort((a,b)=>b.date.localeCompare(a.date)).slice(0,100);byId('depositTransactionSelect').innerHTML='<option value="">Не связывать</option>'+candidates.map(r=>`<option value="${escapeHtml(r.id)}">${formatTransactionDate(r.date)} • ${escapeHtml(r.description)} • ${money(Math.abs(r.amount))}</option>`).join('');byId('depositMovementDialog').showModal();return;}const es=e.target.closest('.edit-subscription');if(es){pkg9OpenSubscription(state.regularPayments.find(x=>x.id===es.dataset.subscriptionId));return;}});
+// The add-subscription button is handled by delegated click above so it keeps working after any rerender.
 byId('depositMovementForm')?.addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());const p=state.financialProducts.find(x=>x.id===d.productId);if(!p)return;p.depositMovements=[...pkg9DepositMovements(p),{id:`deposit-move-${Date.now()}`,date:d.date,movementType:d.movementType,amount:Number(d.amount)||0,transactionId:d.transactionId||'',comment:d.comment||''}];saveState();byId('depositMovementDialog').close();render();pkg9OpenProductDetails(p);});
 byId('subscriptionForm')?.addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries());const existing=state.regularPayments.find(x=>x.id===d.subscriptionId);const history=Array.isArray(existing?.priceHistory)?[...existing.priceHistory]:[];if(existing&&Number(existing.amount)!==Number(d.amount))history.push({date:dateLocal(new Date()),amount:Number(existing.amount)||0});const obj={...(existing||{}),id:existing?.id||`regular-${Date.now()}`,name:d.name,paymentType:'subscription',amount:Number(d.amount)||0,frequency:d.frequency,startDate:d.startDate,endDate:'',category:d.category||'Подписки',account:d.account||'',project:'',payee:d.payee||'',remindDays:Number(d.remindDays)||0,autoPlan:true,trialEndDate:d.trialEndDate||'',subscriptionStatus:d.subscriptionStatus||'active',cancellationDate:d.cancellationDate||'',comment:d.comment||'',priceHistory:history};const i=state.regularPayments.findIndex(x=>x.id===obj.id);if(i>=0)state.regularPayments[i]=obj;else state.regularPayments.push(obj);saveState();byId('subscriptionDialog').close();render();setView('finance-products');});
 byId('deleteSubscriptionBtn')?.addEventListener('click',()=>{const id=byId('subscriptionForm').elements.subscriptionId.value;if(id&&confirm('Удалить подписку?')){state.regularPayments=state.regularPayments.filter(x=>x.id!==id);saveState();byId('subscriptionDialog').close();render();}});
+
+
+// ===== Пакет 10: имущество, документы и гарантии =====
+let activeAssetId = null;
+function assetMember(){ return typeof activeFamilyMember === 'function' ? activeFamilyMember() : null; }
+function assetVisibleItems(){ const m=assetMember(); return state.assets.filter(a=>!m||m.role==='admin'||a.ownerMemberId===m.id); }
+function assetTypeLabel(type){ return ({realEstate:'Недвижимость',vehicle:'Автомобиль',appliance:'Техника',valuable:'Ценная покупка',other:'Прочее'})[type]||'Имущество'; }
+function assetOwnerName(id){ return state.familyMembers.find(x=>x.id===id)?.name||'Татьяна'; }
+function assetDaysUntil(date){ if(!date)return null; const a=new Date(`${date}T00:00:00`),b=new Date();b.setHours(0,0,0,0);return Math.round((a-b)/86400000); }
+function assetDeadlineItems(asset){ return [
+  ['Гарантия',asset.warrantyEndDate],['Обслуживание',asset.serviceDate],['Налог',asset.taxDate],
+  ...(Array.isArray(asset.documents)?asset.documents.filter(d=>d.expiryDate).map(d=>[`Документ: ${d.name}`,d.expiryDate]):[])
+].filter(x=>x[1]).map(([label,date])=>({label,date,days:assetDaysUntil(date)})); }
+function assetUpcomingDeadlines(days=30){ return assetVisibleItems().flatMap(a=>assetDeadlineItems(a).filter(x=>x.days!==null&&x.days>=0&&x.days<=days).map(x=>({...x,asset:a}))).sort((a,b)=>a.days-b.days); }
+function populateAssetSelectors(){
+  const m=assetMember(), owner=byId('assetOwnerSelect'), filter=byId('assetOwnerFilter');
+  const members=m?.role==='admin'?state.familyMembers.filter(x=>x.active!==false):state.familyMembers.filter(x=>x.id===m?.id);
+  if(owner) owner.innerHTML=members.map(x=>`<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('');
+  if(filter){const current=filter.value;filter.innerHTML='<option value="all">Все владельцы</option>'+members.map(x=>`<option value="${escapeHtml(x.id)}">${escapeHtml(x.name)}</option>`).join('');filter.value=[...filter.options].some(o=>o.value===current)?current:'all';}
+  const ins=byId('assetInsuranceSelect'); if(ins) ins.innerHTML='<option value="">Не связана</option>'+state.insurancePolicies.map(p=>`<option value="${escapeHtml(p.id)}">${escapeHtml(p.objectName||p.name||'Полис')}</option>`).join('');
+}
+function renderAssetAlerts(){ const panel=byId('assetAlertsPanel'),target=byId('assetAlerts'),count=byId('assetAlertCount');if(!panel||!target)return;const items=assetUpcomingDeadlines(30);if(count)count.textContent=items.length;panel.hidden=!items.length;target.innerHTML=items.map(x=>`<article class="alert-row"><div><strong>${escapeHtml(x.asset.name)}: ${escapeHtml(x.label)}</strong><small>${formatTransactionDate(x.date)} • ${x.days===0?'сегодня':`через ${x.days} дн.`}</small></div><button class="ghost open-asset-details" data-asset-id="${escapeHtml(x.asset.id)}">Открыть</button></article>`).join(''); }
+function renderAssets(){
+  const target=byId('assetCards'); if(!target)return; populateAssetSelectors(); const m=assetMember(); const add=byId('addAssetBtn');if(add)add.hidden=Boolean(m&&m.role!=='admin'&&!m.canAddOperations);
+  const type=byId('assetTypeFilter')?.value||'all',owner=byId('assetOwnerFilter')?.value||'all',q=(byId('assetSearch')?.value||'').trim().toLowerCase();
+  const list=assetVisibleItems().filter(a=>(type==='all'||a.type===type)&&(owner==='all'||a.ownerMemberId===owner)&&(!q||[a.name,a.location,a.serialNumber,assetOwnerName(a.ownerMemberId)].join(' ').toLowerCase().includes(q)));
+  const all=assetVisibleItems(), upcoming=assetUpcomingDeadlines(30);
+  byId('assetTotalValue').textContent=money(all.reduce((s,a)=>s+Number(a.currentValue||a.purchasePrice||0),0));byId('assetCount').textContent=all.length;byId('assetWarrantyCount').textContent=all.filter(a=>assetDaysUntil(a.warrantyEndDate)>=0).length;byId('assetDeadlineCount').textContent=upcoming.length;
+  target.innerHTML=list.length?list.map(a=>{const deadlines=assetDeadlineItems(a).filter(x=>x.days!==null&&x.days>=0).sort((x,y)=>x.days-y.days).slice(0,3);return `<article class="asset-card"><div class="asset-card-head"><div><span class="asset-kind">${assetTypeLabel(a.type)}</span><h3>${escapeHtml(a.name)}</h3><p>${escapeHtml(assetOwnerName(a.ownerMemberId))}${a.location?` • ${escapeHtml(a.location)}`:''}</p></div><button class="icon-button edit-asset" data-asset-id="${escapeHtml(a.id)}">✏️</button></div><div class="asset-values"><div><span>Текущая стоимость</span><strong>${money(a.currentValue||a.purchasePrice)}</strong></div><div><span>Документы</span><strong>${Array.isArray(a.documents)?a.documents.length:0}</strong></div></div><div class="asset-deadlines">${deadlines.map(d=>`<span class="asset-deadline ${d.days<=7?'due':''}">${escapeHtml(d.label)}: ${d.days===0?'сегодня':`${d.days} дн.`}</span>`).join('')}</div><div class="asset-actions"><button class="ghost open-asset-details" data-asset-id="${escapeHtml(a.id)}">Подробнее</button><button class="ghost add-asset-document" data-asset-id="${escapeHtml(a.id)}">+ Документ</button></div></article>`}).join(''):'<article class="empty-state"><strong>Имущество не добавлено</strong><p>Создайте карточку недвижимости, автомобиля, техники или другой ценной покупки.</p></article>';
+  renderAssetAlerts();
+}
+function openAssetDialog(asset=null){ const f=byId('assetForm');if(!f)return;f.reset();populateAssetSelectors();activeAssetId=asset?.id||null;byId('assetDialogTitle').textContent=asset?'Изменить имущество':'Добавить имущество';byId('deleteAssetBtn').hidden=!asset;if(asset)Object.entries(asset).forEach(([k,v])=>{if(f.elements[k]&&k!=='documents')f.elements[k].value=v??'';});else{f.elements.ownerMemberId.value=assetMember()?.id||'family-tatiana';}byId('assetDialog').showModal(); }
+function openAssetDetails(asset){ activeAssetId=asset.id;const docs=Array.isArray(asset.documents)?asset.documents:[],policy=state.insurancePolicies.find(p=>p.id===asset.insurancePolicyId);byId('assetDetailsTitle').textContent=asset.name;byId('assetDetailsSubtitle').textContent=`${assetTypeLabel(asset.type)} • ${assetOwnerName(asset.ownerMemberId)}`;byId('assetDetailsBody').innerHTML=`<div class="asset-detail-grid"><div><span>Покупка</span><strong>${asset.purchaseDate?formatTransactionDate(asset.purchaseDate):'—'}</strong><small>${money(asset.purchasePrice)}</small></div><div><span>Текущая стоимость</span><strong>${money(asset.currentValue||asset.purchasePrice)}</strong></div><div><span>Серийный номер / VIN</span><strong>${escapeHtml(asset.serialNumber||'—')}</strong></div><div><span>Страховка</span><strong>${escapeHtml(policy?.objectName||policy?.name||'Не связана')}</strong></div></div><h3>Сроки</h3><div class="asset-deadlines">${assetDeadlineItems(asset).map(d=>`<span class="asset-deadline ${d.days!==null&&d.days<=7&&d.days>=0?'due':''}">${escapeHtml(d.label)} • ${formatTransactionDate(d.date)}</span>`).join('')||'<span class="muted">Сроки не заданы</span>'}</div>${asset.notes?`<p>${escapeHtml(asset.notes)}</p>`:''}<div class="panel-head"><div><h3>Документы</h3><p>Чеки, гарантии, договоры и обслуживание</p></div><button class="primary add-asset-document" data-asset-id="${escapeHtml(asset.id)}">+ Документ</button></div><div class="asset-doc-list">${docs.length?docs.map(d=>`<article class="asset-doc-row"><div><strong>${escapeHtml(d.name)}</strong><small>${escapeHtml(d.fileName||'Без файла')}${d.expiryDate?` • до ${formatTransactionDate(d.expiryDate)}`:''}</small></div><div class="asset-doc-actions">${d.dataUrl?`<button class="ghost open-asset-document" data-asset-id="${escapeHtml(asset.id)}" data-document-id="${escapeHtml(d.id)}">Открыть</button>`:''}<button class="icon-button delete-asset-document" data-asset-id="${escapeHtml(asset.id)}" data-document-id="${escapeHtml(d.id)}">🗑</button></div></article>`).join(''):'<p class="muted">Документы ещё не добавлены.</p>'}</div>`;byId('assetDetailsDialog').showModal(); }
+function fileAsDataUrl(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file);});}
+byId('addAssetBtn')?.addEventListener('click',()=>openAssetDialog());
+['assetTypeFilter','assetOwnerFilter'].forEach(id=>byId(id)?.addEventListener('change',renderAssets));byId('assetSearch')?.addEventListener('input',renderAssets);
+byId('assetForm')?.addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.currentTarget).entries()),old=state.assets.find(a=>a.id===d.assetId);const obj={...(old||{}),id:old?.id||`asset-${Date.now()}`,type:d.type,name:d.name,ownerMemberId:d.ownerMemberId||assetMember()?.id||'family-tatiana',purchaseDate:d.purchaseDate||'',purchasePrice:Number(d.purchasePrice)||0,currentValue:Number(d.currentValue)||0,location:d.location||'',serialNumber:d.serialNumber||'',warrantyEndDate:d.warrantyEndDate||'',serviceDate:d.serviceDate||'',taxDate:d.taxDate||'',insurancePolicyId:d.insurancePolicyId||'',notes:d.notes||'',documents:Array.isArray(old?.documents)?old.documents:[]};const i=state.assets.findIndex(a=>a.id===obj.id);if(i>=0)state.assets[i]=obj;else state.assets.push(obj);saveState();byId('assetDialog').close();render();setView('assets');});
+byId('deleteAssetBtn')?.addEventListener('click',()=>{if(activeAssetId&&confirm('Удалить карточку имущества и вложенные документы?')){state.assets=state.assets.filter(a=>a.id!==activeAssetId);saveState();byId('assetDialog').close();render();}});
+byId('editAssetFromDetailsBtn')?.addEventListener('click',()=>{const a=state.assets.find(x=>x.id===activeAssetId);byId('assetDetailsDialog').close();if(a)openAssetDialog(a);});
+byId('assetDocumentForm')?.addEventListener('submit',async e=>{e.preventDefault();const f=e.currentTarget,d=Object.fromEntries(new FormData(f).entries()),a=state.assets.find(x=>x.id===d.assetId);if(!a)return;const file=f.elements.file.files[0];if(file&&file.size>4*1024*1024){alert('Файл больше 4 МБ. Уменьшите размер или сохраните ссылку в заметках.');return;}const dataUrl=file?await fileAsDataUrl(file):'';a.documents=[...(Array.isArray(a.documents)?a.documents:[]),{id:`asset-doc-${Date.now()}`,name:d.name,type:d.type,expiryDate:d.expiryDate||'',fileName:file?.name||'',mimeType:file?.type||'',dataUrl}];saveState();byId('assetDocumentDialog').close();render();openAssetDetails(a);});
+document.addEventListener('click',e=>{const edit=e.target.closest('.edit-asset');if(edit){const a=state.assets.find(x=>x.id===edit.dataset.assetId);if(a)openAssetDialog(a);return;}const open=e.target.closest('.open-asset-details');if(open){const a=state.assets.find(x=>x.id===open.dataset.assetId);if(a)openAssetDetails(a);return;}const add=e.target.closest('.add-asset-document');if(add){const f=byId('assetDocumentForm');f.reset();f.elements.assetId.value=add.dataset.assetId;byId('assetDocumentDialog').showModal();return;}const del=e.target.closest('.delete-asset-document');if(del&&confirm('Удалить документ?')){const a=state.assets.find(x=>x.id===del.dataset.assetId);if(a){a.documents=(a.documents||[]).filter(d=>d.id!==del.dataset.documentId);saveState();render();openAssetDetails(a);}return;}const doc=e.target.closest('.open-asset-document');if(doc){const a=state.assets.find(x=>x.id===doc.dataset.assetId),d=a?.documents?.find(x=>x.id===doc.dataset.documentId);if(d?.dataUrl){const w=window.open();if(w)w.location.href=d.dataUrl;else{const link=document.createElement('a');link.href=d.dataUrl;link.download=d.fileName||d.name;link.click();}}}});
+
+// Package 10.1 — utilities and loan links for real estate and vehicles
+state.assets.forEach((asset) => {
+  if (!Array.isArray(asset.utilityPaymentIds)) asset.utilityPaymentIds = [];
+  if (asset.loanProductId == null) asset.loanProductId = '';
+});
+
+function assetLinkedUtilities(asset) {
+  const ids = new Set(Array.isArray(asset?.utilityPaymentIds) ? asset.utilityPaymentIds : []);
+  return state.regularPayments.filter((item) => item.paymentType === 'utilities' && ids.has(item.id));
+}
+
+function assetUtilityPaidSummary(asset) {
+  const ids = new Set(assetLinkedUtilities(asset).map((item) => item.id));
+  let total = 0;
+  let count = 0;
+  Object.entries(state.plannedPaymentStates || {}).forEach(([occurrenceId, paymentState]) => {
+    const templateId = occurrenceId.split('@')[0];
+    if (!ids.has(templateId) || !paymentState?.paidDate || occurrenceId.includes('@meter@')) return;
+    total += Number(paymentState.paidAmount || 0);
+    count += 1;
+  });
+  return { total, count };
+}
+
+function renderAssetUtilityChecks(asset = null) {
+  const target = byId('assetUtilityPaymentChecks');
+  if (!target) return;
+  const selected = new Set(Array.isArray(asset?.utilityPaymentIds) ? asset.utilityPaymentIds : []);
+  const utilities = state.regularPayments.filter((item) => item.paymentType === 'utilities');
+  target.innerHTML = utilities.length
+    ? utilities.map((item) => `<label class="asset-link-check"><input type="checkbox" name="utilityPaymentIds" value="${escapeHtml(item.id)}" ${selected.has(item.id) ? 'checked' : ''}><span><strong>${escapeHtml(item.name)}</strong><small>${money(item.amount)} • ${escapeHtml(item.frequency || 'регулярно')}</small></span></label>`).join('')
+    : '<p class="muted">Сначала создайте коммунальные платежи в разделе «Календарь».</p>';
+}
+
+function updateAssetLinkFields() {
+  const form = byId('assetForm');
+  if (!form) return;
+  const type = form.elements.type.value;
+  const utilitySection = byId('assetUtilityLinkSection');
+  const loanSection = byId('assetLoanLinkSection');
+  if (utilitySection) utilitySection.hidden = type !== 'realEstate';
+  if (loanSection) loanSection.hidden = !['realEstate', 'vehicle'].includes(type);
+  const hint = byId('assetLoanHint');
+  if (hint) hint.textContent = type === 'vehicle'
+    ? 'Можно привязать автокредит по этому автомобилю.'
+    : 'Можно привязать ипотеку по этой квартире или дому.';
+  if (type !== 'realEstate') {
+    form.querySelectorAll('input[name="utilityPaymentIds"]').forEach((input) => { input.checked = false; });
+  }
+  if (!['realEstate', 'vehicle'].includes(type) && form.elements.loanProductId) {
+    form.elements.loanProductId.value = '';
+  }
+}
+
+const populateAssetSelectorsBase = populateAssetSelectors;
+populateAssetSelectors = function populateAssetSelectorsWithLoans() {
+  populateAssetSelectorsBase();
+  const loanSelect = byId('assetLoanSelect');
+  if (!loanSelect) return;
+  loanSelect.innerHTML = '<option value="">Не связан</option>' + state.financialProducts
+    .filter((item) => item.type === 'loan')
+    .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name || 'Кредит')} • остаток ${money(typeof loanRemaining === 'function' ? loanRemaining(item) : (item.remainingBalance || item.principal || 0))}</option>`)
+    .join('');
+};
+
+openAssetDialog = function openAssetDialogWithLinks(asset = null) {
+  const form = byId('assetForm');
+  if (!form) return;
+  form.reset();
+  populateAssetSelectors();
+  activeAssetId = asset?.id || null;
+  byId('assetDialogTitle').textContent = asset ? 'Изменить имущество' : 'Добавить имущество';
+  byId('deleteAssetBtn').hidden = !asset;
+  if (asset) {
+    Object.entries(asset).forEach(([key, value]) => {
+      if (form.elements[key] && !['documents', 'utilityPaymentIds'].includes(key)) form.elements[key].value = value ?? '';
+    });
+  } else {
+    form.elements.ownerMemberId.value = assetMember()?.id || 'family-tatiana';
+  }
+  renderAssetUtilityChecks(asset);
+  updateAssetLinkFields();
+  byId('assetDialog').showModal();
+};
+
+openAssetDetails = function openAssetDetailsWithLinks(asset) {
+  activeAssetId = asset.id;
+  const documents = Array.isArray(asset.documents) ? asset.documents : [];
+  const policy = state.insurancePolicies.find((item) => item.id === asset.insurancePolicyId);
+  const loan = state.financialProducts.find((item) => item.id === asset.loanProductId && item.type === 'loan');
+  const utilities = assetLinkedUtilities(asset);
+  const utilitySummary = assetUtilityPaidSummary(asset);
+  byId('assetDetailsTitle').textContent = asset.name;
+  byId('assetDetailsSubtitle').textContent = `${assetTypeLabel(asset.type)} • ${assetOwnerName(asset.ownerMemberId)}`;
+  byId('assetDetailsBody').innerHTML = `
+    <div class="asset-detail-grid">
+      <div><span>Покупка</span><strong>${asset.purchaseDate ? formatTransactionDate(asset.purchaseDate) : '—'}</strong><small>${money(asset.purchasePrice)}</small></div>
+      <div><span>Текущая стоимость</span><strong>${money(asset.currentValue || asset.purchasePrice)}</strong></div>
+      <div><span>Серийный номер / VIN</span><strong>${escapeHtml(asset.serialNumber || '—')}</strong></div>
+      <div><span>Страховка</span><strong>${escapeHtml(policy?.objectName || policy?.name || 'Не связана')}</strong></div>
+    </div>
+    ${asset.type === 'realEstate' ? `<section class="asset-linked-block">
+      <div class="panel-head"><div><h3>ЖКХ этой недвижимости</h3><p>${utilities.length ? `${utilities.length} платежей • оплачено ${money(utilitySummary.total)} (${utilitySummary.count} операций)` : 'Коммунальные платежи не привязаны'}</p></div><button class="ghost open-asset-utilities" type="button">Открыть календарь</button></div>
+      ${utilities.map((item) => `<div class="asset-linked-row"><div><strong>${escapeHtml(item.name)}</strong><small>${money(item.amount)} • ${escapeHtml(item.frequency || 'регулярно')}</small></div></div>`).join('')}
+    </section>` : ''}
+    ${['realEstate', 'vehicle'].includes(asset.type) ? `<section class="asset-linked-block"><div class="panel-head"><div><h3>${asset.type === 'realEstate' ? 'Ипотека' : 'Автокредит'}</h3><p>${loan ? `${escapeHtml(loan.name)} • остаток ${money(typeof loanRemaining === 'function' ? loanRemaining(loan) : (loan.remainingBalance || loan.principal || 0))}` : 'Кредит не привязан'}</p></div>${loan ? `<button class="ghost open-linked-loan" type="button" data-product-id="${escapeHtml(loan.id)}">Подробнее</button>` : ''}</div></section>` : ''}
+    <h3>Сроки</h3>
+    <div class="asset-deadlines">${assetDeadlineItems(asset).map((item) => `<span class="asset-deadline ${item.days !== null && item.days <= 7 && item.days >= 0 ? 'due' : ''}">${escapeHtml(item.label)} • ${formatTransactionDate(item.date)}</span>`).join('') || '<span class="muted">Сроки не заданы</span>'}</div>
+    ${asset.notes ? `<p>${escapeHtml(asset.notes)}</p>` : ''}
+    <div class="panel-head"><div><h3>Документы</h3><p>Чеки, гарантии, договоры и обслуживание</p></div><button class="primary add-asset-document" data-asset-id="${escapeHtml(asset.id)}">+ Документ</button></div>
+    <div class="asset-doc-list">${documents.length ? documents.map((documentItem) => `<article class="asset-doc-row"><div><strong>${escapeHtml(documentItem.name)}</strong><small>${escapeHtml(documentItem.fileName || 'Без файла')}${documentItem.expiryDate ? ` • до ${formatTransactionDate(documentItem.expiryDate)}` : ''}</small></div><div class="asset-doc-actions">${documentItem.dataUrl ? `<button class="ghost open-asset-document" data-asset-id="${escapeHtml(asset.id)}" data-document-id="${escapeHtml(documentItem.id)}">Открыть</button>` : ''}<button class="icon-button delete-asset-document" data-asset-id="${escapeHtml(asset.id)}" data-document-id="${escapeHtml(documentItem.id)}">🗑</button></div></article>`).join('') : '<p class="muted">Документы ещё не добавлены.</p>'}</div>`;
+  byId('assetDetailsDialog').showModal();
+};
+
+byId('assetForm')?.elements?.type?.addEventListener('change', updateAssetLinkFields);
+
+// Capture mode prevents the older Package 10 submit handler from saving before the new link fields.
+byId('assetForm')?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form).entries());
+  const old = state.assets.find((item) => item.id === data.assetId);
+  const asset = {
+    ...(old || {}),
+    id: old?.id || `asset-${Date.now()}`,
+    type: data.type,
+    name: data.name,
+    ownerMemberId: data.ownerMemberId || assetMember()?.id || 'family-tatiana',
+    purchaseDate: data.purchaseDate || '',
+    purchasePrice: Number(data.purchasePrice) || 0,
+    currentValue: Number(data.currentValue) || 0,
+    location: data.location || '',
+    serialNumber: data.serialNumber || '',
+    warrantyEndDate: data.warrantyEndDate || '',
+    serviceDate: data.serviceDate || '',
+    taxDate: data.taxDate || '',
+    insurancePolicyId: data.insurancePolicyId || '',
+    loanProductId: ['realEstate', 'vehicle'].includes(data.type) ? (data.loanProductId || '') : '',
+    utilityPaymentIds: data.type === 'realEstate'
+      ? [...form.querySelectorAll('input[name="utilityPaymentIds"]:checked')].map((input) => input.value)
+      : [],
+    notes: data.notes || '',
+    documents: Array.isArray(old?.documents) ? old.documents : []
+  };
+  const index = state.assets.findIndex((item) => item.id === asset.id);
+  if (index >= 0) state.assets[index] = asset;
+  else state.assets.push(asset);
+  saveState();
+  byId('assetDialog').close();
+  render();
+  setView('assets');
+}, true);
+
+document.addEventListener('click', (event) => {
+  const utilitiesButton = event.target.closest('.open-asset-utilities');
+  if (utilitiesButton) {
+    byId('assetDetailsDialog')?.close();
+    setView('calendar');
+    if (byId('regularTypeFilter')) {
+      byId('regularTypeFilter').value = 'utilities';
+      renderRegularMoney();
+    }
+    return;
+  }
+  const loanButton = event.target.closest('.open-linked-loan');
+  if (loanButton) {
+    const product = state.financialProducts.find((item) => item.id === loanButton.dataset.productId);
+    if (!product) return;
+    byId('assetDetailsDialog')?.close();
+    setView('finance-products');
+    setTimeout(() => pkg9OpenProductDetails(product), 50);
+  }
+});
