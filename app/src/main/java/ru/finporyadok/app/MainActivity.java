@@ -2,6 +2,11 @@ package ru.finporyadok.app;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import androidx.core.app.ActivityCompat;
+import androidx.core.app.NotificationManagerCompat;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
@@ -41,11 +46,13 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions;
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning;
 
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 1001;
     private static final int FILE_SAVE_REQUEST = 1002;
     private static final int CLOUD_FOLDER_REQUEST = 1003;
+    private static final int NOTIFICATION_PERMISSION_REQUEST = 1004;
     private static final String CLOUD_PREFS = "finporyadok_cloud";
     private static final String CLOUD_URI_KEY = "tree_uri";
     private WebView webView;
@@ -83,6 +90,7 @@ public class MainActivity extends Activity {
         webView.addJavascriptInterface(new AndroidOfficialDataBridge(), "AndroidOfficialDataBridge");
         webView.addJavascriptInterface(new AndroidReceiptOcrBridge(), "AndroidReceiptOcr");
         webView.addJavascriptInterface(new AndroidCloudSyncBridge(), "AndroidCloudSync");
+        webView.addJavascriptInterface(new AndroidNotificationBridge(), "AndroidNotifications");
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest request) {
@@ -121,6 +129,49 @@ public class MainActivity extends Activity {
 
         setContentView(webView);
         webView.loadUrl("file:///android_asset/www/index.html");
+    }
+
+
+    public final class AndroidNotificationBridge {
+        @JavascriptInterface
+        public void sync(String json) {
+            try {
+                NotificationScheduler.sync(getApplicationContext(), new JSONArray(json == null ? "[]" : json));
+            } catch (Exception error) {
+                sendNotificationState(false, "Не удалось запланировать уведомления: " + error.getMessage());
+            }
+        }
+
+        @JavascriptInterface
+        public void requestPermission() {
+            runOnUiThread(() -> {
+                if (Build.VERSION.SDK_INT >= 33 && ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    ActivityCompat.requestPermissions(MainActivity.this, new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST);
+                } else {
+                    sendNotificationState(NotificationManagerCompat.from(MainActivity.this).areNotificationsEnabled(), "");
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public boolean areEnabled() {
+            if (Build.VERSION.SDK_INT >= 33 && ActivityCompat.checkSelfPermission(MainActivity.this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return false;
+            return NotificationManagerCompat.from(MainActivity.this).areNotificationsEnabled();
+        }
+    }
+
+    private void sendNotificationState(boolean enabled, String message) {
+        String js = "window.onNativeNotificationState && window.onNativeNotificationState(" + enabled + "," + JSONObject.quote(message == null ? "" : message) + ");";
+        if (webView != null) webView.post(() -> webView.evaluateJavascript(js, null));
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
+            boolean enabled = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+            sendNotificationState(enabled, enabled ? "Системные уведомления включены" : "Разрешение на уведомления не предоставлено");
+        }
     }
 
     public final class AndroidQrBridge {
