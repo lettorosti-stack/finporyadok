@@ -116,54 +116,51 @@
 <small id="metricWorkExpenseCount">0 покупок</small>
 </article>
 </div>
+<div class="dashboard-health-chart">
+  <div class="dashboard-donut" id="dashboardCategoryDonut" aria-label="Диаграмма расходов по категориям"></div>
+  <div class="dashboard-donut-copy">
+    <strong>Расходы по категориям</strong>
+    <small id="dashboardCategoryLead">Нет расходов</small>
+    <button class="ghost" data-view-jump="reports" type="button">Подробнее</button>
+  </div>
+</div>
 <div class="finance-picture-footer">
 <span><b id="metricCount">0</b> операций</span>
 <span id="metricAverage">0 ₽ средний расход</span>
 </div>
 </div>
-<div class="dashboard-grid">
-<section class="panel">
+<div class="dashboard-premium-layout">
+<section class="panel dashboard-accounts-panel">
 <div class="panel-head">
-<div>
-<h2>Счета</h2>
-<p>Открываются по нажатию</p>
+<div><h2>Счета</h2></div>
+<button data-view-jump="accounts">Все счета</button>
 </div>
-<button data-view-jump="accounts">Все</button>
-</div>
-<div class="stack" id="accountSummary"></div>
+<div class="dashboard-account-cards" id="accountSummary"></div>
 </section>
-<section class="panel">
-<div class="panel-head">
-<div>
-<h2>Категории</h2>
-<p>Расшифровка затрат внутри</p>
+
+<div class="dashboard-dual-grid">
+<section class="panel dashboard-compact-panel">
+<div class="panel-head"><div><h2>Ближайшие платежи</h2></div><button data-view-jump="calendar" aria-label="Открыть календарь">⌁</button></div>
+<div class="dashboard-mini-list" id="dashboardUpcomingPayments"></div>
+<button class="dashboard-panel-link" data-view-jump="calendar" type="button">Все платежи <span>›</span></button>
+</section>
+<section class="panel dashboard-compact-panel">
+<div class="panel-head"><div><h2>Уведомления</h2></div><button id="dashboardOpenNotificationsBtn" type="button" aria-label="Открыть уведомления">⌁</button></div>
+<div class="dashboard-mini-list" id="dashboardMiniNotifications"></div>
+<button class="dashboard-panel-link" id="dashboardAllNotificationsBtn" type="button">Все уведомления <span>›</span></button>
+</section>
 </div>
-<button data-view-jump="budgets">Все</button>
-</div>
+
+<section class="panel dashboard-categories-panel">
+<div class="panel-head"><div><h2>Категории</h2></div><button data-view-jump="budgets">Все категории</button></div>
 <div class="dashboard-category-grid" id="categorySummary"></div>
 </section>
-<section class="panel wide">
-<div class="panel-head">
-<div>
-<h2>Последние операции</h2>
-<p>Нажмите на строку, чтобы увидеть детали</p>
-</div>
-<button data-view-jump="transactions">Все операции</button>
-</div>
-<div class="table-wrap">
-<table>
-<thead>
-<tr>
-<th>Дата</th>
-<th>Описание</th>
-<th>Категория</th>
-<th>Счёт</th>
-<th>Проект</th>
-<th class="amount">Сумма</th>
-</tr>
-</thead>
-<tbody id="latestRows"></tbody>
-</table>
+
+<section class="panel dashboard-latest-panel">
+<div class="panel-head"><div><h2>Последние операции</h2></div><button data-view-jump="transactions">Все операции</button></div>
+<div class="dashboard-transaction-list" id="dashboardLatestCards"></div>
+<div class="table-wrap dashboard-desktop-table">
+<table><thead><tr><th>Дата</th><th>Описание</th><th>Категория</th><th>Счёт</th><th>Проект</th><th class="amount">Сумма</th></tr></thead><tbody id="latestRows"></tbody></table>
 </div>
 </section>
 </div>
@@ -438,6 +435,12 @@
 </div>
 <section class="panel analytics-health-panel">
 <div class="panel-head"><div><h2>Финансовое здоровье</h2><p>Главные показатели семьи за выбранный период</p></div><button class="secondary" id="exportAnalyticsBtn" type="button">Экспорт отчёта</button></div>
+<div class="financial-health-layout">
+<div class="financial-health-donut-card">
+  <div class="health-donut" id="analyticsHealthDonut"></div>
+  <div class="health-donut-center"><strong id="analyticsHealthTotal">0 ₽</strong><small>расходы</small></div>
+  <div class="health-category-legend" id="analyticsHealthLegend"></div>
+</div>
 <div class="analytics-kpi-grid">
 <article><span>Денежный поток</span><strong id="analyticsNetFlow">0 ₽</strong><small>доходы минус расходы</small></article>
 <article><span>Норма сбережений</span><strong id="analyticsSavingsRate">0%</strong><small>доля остатка от доходов</small></article>
@@ -445,6 +448,7 @@
 <article><span>Долговая нагрузка</span><strong id="analyticsDebtLoad">0%</strong><small>платежи по кредитам к доходу</small></article>
 <article><span>Резерв</span><strong id="analyticsRunway">0 мес.</strong><small>на сколько хватит ликвидных денег</small></article>
 <article><span>Цели накоплений</span><strong id="analyticsGoalsProgress">0%</strong><small id="analyticsGoalsMeta">цели не созданы</small></article>
+</div>
 </div>
 </section>
 <div class="analytics-grid">

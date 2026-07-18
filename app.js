@@ -502,7 +502,7 @@ function categoryIcon(categoryName) {
   const catalog = financeIconCatalog[meta.icon];
   const fallbackLabel = catalog?.[0] || categoryIcons[meta.icon]?.label || root || "Категория";
   const assetFile = categoryAssetFile(root, meta.icon);
-  return `<span class="category-icon category-icon--asset" title="${escapeHtml(fallbackLabel)}" aria-label="${escapeHtml(fallbackLabel)}"><img src="./assets/category-icons/${escapeHtml(assetFile)}" alt="" loading="lazy" decoding="async" onerror="this.closest('.category-icon').classList.add('category-icon--missing');this.remove()"></span>`;
+  return `<span class="category-icon category-icon--asset" title="${escapeHtml(fallbackLabel)}" aria-label="${escapeHtml(fallbackLabel)}"><img src="./assets/category-icons-premium/${escapeHtml(assetFile)}" alt="" loading="lazy" decoding="async" onerror="this.closest('.category-icon').classList.add('category-icon--missing');this.remove()"></span>`;
 }
 
 function categoryPill(categoryName) {
@@ -1071,6 +1071,82 @@ function renderMeta() {
   renderReviewCenter();
 }
 
+
+function dashboardCategorySummaryData(rows, limit = 6) {
+  return summarizeRows(rows, categoryRoot, (row) => Number(row.amount) < 0 && typeOf(row) !== 'transfer')
+    .filter((item) => item.total > 0)
+    .slice(0, limit);
+}
+
+function renderConicDonut(targetId, items, total) {
+  const target = byId(targetId);
+  if (!target) return;
+  const palette = ['#13a8a8','#46c3a6','#8b6bd8','#ff8a3d','#ffc928','#82d4d2','#94a3b8'];
+  if (!items.length || !total) {
+    target.style.background = 'conic-gradient(#e8eef4 0 100%)';
+    target.innerHTML = '<span>Нет данных</span>';
+    return;
+  }
+  let start = 0;
+  const stops = items.map((item, index) => {
+    const end = start + (item.total / total) * 100;
+    const part = `${palette[index % palette.length]} ${start.toFixed(2)}% ${end.toFixed(2)}%`;
+    start = end;
+    return part;
+  });
+  if (start < 100) stops.push(`#e7edf3 ${start.toFixed(2)}% 100%`);
+  target.style.background = `conic-gradient(${stops.join(',')})`;
+  target.innerHTML = '<span>Категории</span>';
+}
+
+function dashboardPaymentIcon(item) {
+  const typeMap = { utilities:'utilities', subscription:'subscriptions', loan:'debt', insurance:'insurance', tax:'taxes', education:'education' };
+  const iconId = typeMap[item.paymentType] || detectCategoryIcon(item.category || item.name || 'custom');
+  const asset = categoryAssetFile(item.category || item.name || '', iconId);
+  return `<span class="dashboard-list-icon"><img src="./assets/category-icons-premium/${escapeHtml(asset)}" alt=""></span>`;
+}
+
+function renderDashboardUpcomingPayments() {
+  const target = byId('dashboardUpcomingPayments');
+  if (!target || typeof regularOccurrences !== 'function') return;
+  const today = dateLocal(new Date());
+  const next = regularOccurrences().filter((item) => occurrenceStatus(item) !== 'paid' && item.dueDate >= today).slice(0,3);
+  target.innerHTML = next.length ? next.map((item) => `<button class="dashboard-mini-row open-planned-payment" data-occurrence-id="${escapeHtml(item.occurrenceId)}" type="button">
+    ${dashboardPaymentIcon(item)}
+    <span class="dashboard-mini-copy"><strong>${escapeHtml(item.name)}</strong><small>${formatTransactionDate(item.dueDate)}</small></span>
+    <b>${item.eventKind === 'meter-reading' ? 'Показания' : money(item.amount)}</b><span class="chevron">›</span>
+  </button>`).join('') : '<div class="dashboard-empty-mini">Ближайших платежей нет</div>';
+}
+
+function renderDashboardMiniNotifications() {
+  const target = byId('dashboardMiniNotifications');
+  if (!target) return;
+  const items = [];
+  if (typeof utilityEventReminders === 'function') utilityEventReminders().slice(0,2).forEach((x) => items.push({icon:'utilities',title:x.name,meta:formatTransactionDate(x.dueDate)}));
+  if (typeof loanPaymentReminders === 'function') loanPaymentReminders().slice(0,2).forEach((x) => items.push({icon:'debt',title:x.name,meta:formatTransactionDate(x.dueDate)}));
+  if (typeof financeProductMaturityReminders === 'function') financeProductMaturityReminders().slice(0,1).forEach((x) => items.push({icon:'savings',title:x.name,meta:'Закрытие через 3 дня'}));
+  if (!items.length) items.push({icon:'insurance',title:'Все обязательства под контролем',meta:'Новых уведомлений нет'});
+  target.innerHTML = items.slice(0,3).map((item) => {
+    const asset = categoryAssetFile(item.title, item.icon);
+    return `<button class="dashboard-mini-row" id="notificationCenterBtnProxy" type="button"><span class="dashboard-list-icon"><img src="./assets/category-icons-premium/${escapeHtml(asset)}" alt=""></span><span class="dashboard-mini-copy"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.meta)}</small></span><span class="chevron">›</span></button>`;
+  }).join('');
+}
+
+function renderDashboardLatestCards(rows) {
+  const target = byId('dashboardLatestCards');
+  if (!target) return;
+  target.innerHTML = rows.length ? rows.slice(0,6).map((row) => {
+    const kind = typeOf(row);
+    const positive = Number(row.amount) >= 0 && kind !== 'transfer';
+    const brandName = row.payee || row.description || row.account || 'Операция';
+    const iconHtml = storeForName(brandName) ? storeIcon(brandName) : categoryIcon(categoryRoot(row));
+    return `<button class="dashboard-operation-card clickable-row" data-row-id="${escapeHtml(row.id)}" type="button">
+      ${iconHtml}<span class="dashboard-operation-copy"><strong>${escapeHtml(row.description || row.payee || 'Операция')}</strong><small>${escapeHtml(categoryRoot(row) || row.account || '')}</small></span>
+      <span class="dashboard-operation-amount ${positive ? 'good' : ''}"><b>${kind === 'transfer' ? '0 ₽' : money(row.amount)}</b><small>${formatTransactionDate(row.date)}</small></span><span class="chevron">›</span>
+    </button>`;
+  }).join('') : '<div class="dashboard-empty-mini">Операций пока нет</div>';
+}
+
 function renderDashboard() {
   const selected = byId("dashboardPeriod")?.value || "month";
   const range = rowsInNamedPeriod(selected);
@@ -1093,24 +1169,29 @@ function renderDashboard() {
   if (byId("metricWorkExpense")) byId("metricWorkExpense").textContent = money(workTotal);
   if (byId("metricWorkExpenseCount")) byId("metricWorkExpenseCount").textContent = `${workRows.length} покупок`;
 
+  const dashboardCategories = dashboardCategorySummaryData(rows, 6);
+  renderConicDonut('dashboardCategoryDonut', dashboardCategories, expense);
+  if (byId('dashboardCategoryLead')) byId('dashboardCategoryLead').textContent = dashboardCategories[0] ? `${dashboardCategories[0].name} • ${money(dashboardCategories[0].total)}` : 'Нет расходов';
+
   const latest = [...rows].sort((a, b) => `${b.date} ${b.time || ''}`.localeCompare(`${a.date} ${a.time || ''}`)).slice(0, 12);
   byId("latestRows").innerHTML = latest.length ? latest.map(rowTemplate).join("") : `<tr><td colspan="6">Нет операций за выбранный период</td></tr>`;
+  renderDashboardLatestCards(latest);
+  renderDashboardUpcomingPayments();
+  renderDashboardMiniNotifications();
 
-  const accountTotals = summarizeRows(rows, (row) => row.account || row.from || "Без счёта", (row) => typeOf(row) !== 'transfer');
-  byId("accountSummary").innerHTML = accountTotals.slice(0, 6).length
-    ? accountTotals.slice(0, 6).map((item) => accountSummaryRow(item.name, `${item.count} операций`, money(item.total))).join("")
-    : `<article class="empty-state"><strong>Нет счетов</strong><p>За выбранный период движения не найдены.</p></article>`;
+  const accountTotals = accountSummaries().slice(0, 6);
+  byId("accountSummary").innerHTML = accountTotals.length
+    ? accountTotals.map((item) => accountSummaryRow(item.name, item.type || `${item.count} операций`, money(Number(item.balance) || Number(item.total) || 0))).join("")
+    : `<article class="empty-state"><strong>Нет счетов</strong><p>Добавьте банковский счёт или импортируйте операции.</p></article>`;
 
   const cats = topBy(rows, categoryRoot, (row) => row.amount < 0).slice(0, 8);
   byId("categorySummary").innerHTML = cats.length
     ? cats.map((item) => {
-        const iconId = detectCategoryIcon(item.name);
-        const icon = categoryIcons[iconId] || categoryIcons.default;
         return `<button class="dashboard-category-tile drill-card" data-drill-kind="category" data-drill-value="${escapeHtml(item.name)}" type="button">
-          <span class="category-icon" style="--cat-bg:${icon.tone}" aria-hidden="true"><svg viewBox="0 0 24 24">${icon.svg}</svg></span>
+          ${categoryIcon(item.name)}
           <strong>${escapeHtml(item.name)}</strong>
           <b>${money(item.total)}</b>
-          <small>${item.count} операций</small>
+          <small>${item.count} операций</small><span class="chevron">›</span>
         </button>`;
       }).join("")
     : `<article class="empty-state"><strong>Нет категорий</strong><p>За выбранный период расходов пока нет.</p></article>`;
@@ -1136,7 +1217,12 @@ function summaryRow(title, sub, value) {
 }
 
 function accountSummaryRow(title, sub, value) {
-  return `<article class="row account-row drill-card" data-drill-kind="account" data-drill-value="${escapeHtml(title)}" tabindex="0"><div><strong>${accountPill(title)}</strong><small>${sub}</small></div><b>${value}</b></article>`;
+  const brand = brandForAccount(title);
+  const label = brand?.name || title;
+  return `<article class="dashboard-account-card drill-card" data-drill-kind="account" data-drill-value="${escapeHtml(title)}" tabindex="0">
+    <div class="dashboard-account-head">${bankIcon(title)}<div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(sub)}</small></div></div>
+    <b>${value}</b>
+  </article>`;
 }
 
 function progressRow(title, count, total, max) {
@@ -2157,6 +2243,11 @@ function analyticsInsightCard(title, text, tone = "neutral") {
 
 function renderAdvancedAnalytics(rows) {
   const snapshot = analyticsSnapshot(rows);
+  const healthCategories = dashboardCategorySummaryData(rows, 6);
+  const healthTotal = healthCategories.reduce((sum, item) => sum + Number(item.total || 0), 0);
+  renderConicDonut('analyticsHealthDonut', healthCategories, healthTotal);
+  if (byId('analyticsHealthTotal')) byId('analyticsHealthTotal').textContent = money(healthTotal);
+  if (byId('analyticsHealthLegend')) byId('analyticsHealthLegend').innerHTML = healthCategories.map((item, index) => `<div><i style="--legend-index:${index}"></i><span>${escapeHtml(item.name)}</span><b>${healthTotal ? Math.round(item.total / healthTotal * 100) : 0}%</b></div>`).join('');
   byId("analyticsNetFlow").textContent = money(snapshot.net);
   byId("analyticsNetFlow").classList.toggle("negative", snapshot.net < 0);
   byId("analyticsSavingsRate").textContent = `${Math.round(snapshot.savingsRate)}%`;
@@ -5764,3 +5855,11 @@ if (package104AddAssetButton) {
 function syncMobileNavigation(viewId){document.querySelectorAll('.mobile-bottom-nav [data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===viewId));}
 document.addEventListener('click',event=>{const theme=event.target.closest('[data-ui-theme]');if(theme){state.uiPreferences=state.uiPreferences||{};state.uiPreferences.theme=theme.dataset.uiTheme;applyUiTheme();renderThemeOptions();saveState();return;}const nav=event.target.closest('.mobile-bottom-nav [data-view]');if(nav){event.preventDefault();setView(nav.dataset.view);syncMobileNavigation(nav.dataset.view);return;}if(event.target.closest('#mobileAddTxBtn')){event.preventDefault();byId('addTxBtn')?.click();}});
 const __setViewOriginal=setView;setView=function(id){const r=__setViewOriginal(id);syncMobileNavigation(id);return r;};syncMobileNavigation(document.querySelector('.view.active')?.id||'dashboard');
+
+
+document.addEventListener('click', (event) => {
+  if (event.target.closest('#dashboardAllNotificationsBtn, #dashboardOpenNotificationsBtn, #notificationCenterBtnProxy')) {
+    event.preventDefault();
+    byId('notificationCenterBtn')?.click();
+  }
+});
