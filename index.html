@@ -57,7 +57,7 @@
 </div>
 <div class="top-actions">
 <input id="searchInput" placeholder="Найти операцию, магазин, проект или счёт" type="search"/>
-<button class="family-profile-button" id="activeFamilyProfileBtn" type="button"><span class="family-avatar family-avatar--teal">Т</span><span>Татьяна</span></button><button class="ghost" id="exportBtn">Экспорт</button>
+<button class="family-profile-button" id="activeFamilyProfileBtn" type="button"><span class="family-avatar family-avatar--teal">Т</span><span>Татьяна</span></button><button class="ghost theme-shortcut-button" id="openThemeSettingsBtn" type="button"><span>🎨</span><span id="activeThemeName">Фон: Северное сияние</span></button><button class="ghost" id="exportBtn">Экспорт</button>
 <button class="primary" id="addTxBtn">+ Операция</button>
 </div>
 </header>
@@ -167,6 +167,10 @@
 </div>
 </section>
 </div>
+<section class="panel dashboard-alert-panel native-notification-panel" id="nativeNotificationPanel">
+<div class="panel-head"><div><h3>Системные уведомления Android</h3><p id="nativeNotificationStatus">Проверяем разрешение и расписание…</p></div><button class="ghost" id="enableNativeNotificationsBtn" type="button">Включить</button></div>
+<div class="notification-settings-row"><span>Уведомления приходят, даже когда приложение закрыто: платежи, кредиты, подписки, страховки, имущество и документы.</span><strong id="nativeNotificationScheduleCount">0 запланировано</strong></div>
+</section>
 <section class="panel dashboard-alert-panel" id="assetAlertsPanel"><div class="panel-head"><div><h3>Имущество и документы</h3><p>Гарантии, обслуживание, налоги и документы с приближающимися сроками</p></div><span class="tag" id="assetAlertCount">0</span></div><div class="alert-list" id="assetAlerts"></div></section>
 <section class="panel dashboard-alert-panel" id="insuranceAlertsPanel">
 <div class="panel-head">
@@ -432,6 +436,32 @@
 <strong id="reportCategoryCount">0</strong>
 </article>
 </div>
+<section class="panel analytics-health-panel">
+<div class="panel-head"><div><h2>Финансовое здоровье</h2><p>Главные показатели семьи за выбранный период</p></div><button class="secondary" id="exportAnalyticsBtn" type="button">Экспорт отчёта</button></div>
+<div class="analytics-kpi-grid">
+<article><span>Денежный поток</span><strong id="analyticsNetFlow">0 ₽</strong><small>доходы минус расходы</small></article>
+<article><span>Норма сбережений</span><strong id="analyticsSavingsRate">0%</strong><small>доля остатка от доходов</small></article>
+<article><span>Капитал семьи</span><strong id="analyticsNetWorth">0 ₽</strong><small>счета и имущество минус долги</small></article>
+<article><span>Долговая нагрузка</span><strong id="analyticsDebtLoad">0%</strong><small>платежи по кредитам к доходу</small></article>
+<article><span>Резерв</span><strong id="analyticsRunway">0 мес.</strong><small>на сколько хватит ликвидных денег</small></article>
+<article><span>Цели накоплений</span><strong id="analyticsGoalsProgress">0%</strong><small id="analyticsGoalsMeta">цели не созданы</small></article>
+</div>
+</section>
+<div class="analytics-grid">
+<section class="panel">
+<div class="panel-head"><div><h2>Умные выводы</h2><p>Что изменилось и на что обратить внимание</p></div></div>
+<div class="stack" id="analyticsInsights"></div>
+</section>
+<section class="panel">
+<div class="panel-head"><div><h2>Необычные расходы</h2><p>Крупные операции относительно обычных трат</p></div></div>
+<div class="stack" id="analyticsAnomalies"></div>
+</section>
+</div>
+<section class="panel final-check-panel">
+<div class="panel-head"><div><h2>Финальная проверка приложения</h2><p>Автотест ключевых разделов и целостности данных</p></div><div class="button-row"><button class="secondary" id="runFinalTestsBtn" type="button">Запустить проверку</button><button class="secondary" id="downloadFinalTestsBtn" type="button">Скачать результат</button></div></div>
+<div class="final-test-summary" id="finalTestSummary">Проверка ещё не запускалась</div>
+<div class="final-test-list" id="finalTestResults"></div>
+</section>
 <div class="report-chart-grid">
 <section class="panel chart-panel">
 <div class="panel-head"><div><h2>Структура расходов</h2><p>Доля крупнейших категорий</p></div></div>
@@ -642,6 +672,34 @@
 </section>
 
 <section class="view" id="settings">
+<section class="panel design-system-panel" id="appearancePanel">
+  <div class="panel-head">
+    <div>
+      <span class="eyebrow">Дизайн и навигация</span>
+      <h2>Современный внешний вид</h2>
+      <p>Выберите фон приложения и общий визуальный характер. Изменения применяются сразу ко всем разделам.</p>
+    </div>
+    <button class="ghost" id="themeResetBtn" type="button">Стандартный фон</button>
+  </div>
+  <div class="theme-switcher" id="themeOptions"></div>
+  <div class="theme-guide-grid">
+    <article class="card theme-guide-card">
+      <div class="backup-card-icon">🧭</div>
+      <h3>Понятная навигация</h3>
+      <p>Активный раздел выделяется сильнее, ключевые действия подняты наверх, а карточки читаются легче.</p>
+    </article>
+    <article class="card theme-guide-card">
+      <div class="backup-card-icon">✨</div>
+      <h3>Мягкий современный UI</h3>
+      <p>Стеклянные панели, больше воздуха, плавные акценты и улучшенная иерархия текста.</p>
+    </article>
+    <article class="card theme-guide-card">
+      <div class="backup-card-icon">🎨</div>
+      <h3>Несколько фонов</h3>
+      <p>Можно выбрать светлый, тёплый, садовый или тёмный вариант — без потери читаемости данных.</p>
+    </article>
+  </div>
+</section>
 <div class="backup-hero panel">
   <div>
     <span class="eyebrow">База ФинПорядок</span>

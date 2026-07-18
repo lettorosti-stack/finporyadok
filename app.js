@@ -3,7 +3,7 @@ const storeKey = "finporyadok.state.alzex.v1";
   try { localStorage.removeItem(legacyKey); } catch {}
 });
 const seedRows = window.ANDROMONEY_DATA?.rows || [];
-const CURRENT_SCHEMA_VERSION = 10;
+const CURRENT_SCHEMA_VERSION = 12;
 const savedState = loadState();
 
 const state = {
@@ -28,6 +28,7 @@ const state = {
   importRules: Array.isArray(savedState.importRules) ? savedState.importRules : [],
   reconciliationReviewed: savedState.reconciliationReviewed && typeof savedState.reconciliationReviewed === "object" ? savedState.reconciliationReviewed : {},
   assets: Array.isArray(savedState.assets) ? savedState.assets : [],
+  uiPreferences: savedState.uiPreferences && typeof savedState.uiPreferences === 'object' ? savedState.uiPreferences : { theme: 'aurora' },
   shopping: savedState.shopping.length ? savedState.shopping : [
     { name: "Молоко", qty: "2 л", days: 4, price: 92 },
     { name: "Корм", qty: "3 кг", days: 26, price: 1450 },
@@ -59,6 +60,60 @@ const views = {
   assets: ["Имущество и документы", "Недвижимость, автомобили, техника, гарантии и сроки обслуживания."],
   settings: ["Настройки", "Офлайн-режим, синхронизация и безопасность."]
 };
+
+const THEME_PRESETS = {
+  aurora: { name: 'Северное сияние', description: 'Лёгкий фиолетово-бирюзовый фон', themeColor: '#6c63ff' },
+  pearl: { name: 'Светлая классика', description: 'Чистый голубой минимализм', themeColor: '#2f80ed' },
+  sand: { name: 'Тёплый беж', description: 'Спокойный домашний фон', themeColor: '#c7794c' },
+  garden: { name: 'Садовый мятный', description: 'Свежий зелёный акцент', themeColor: '#1f8b72' },
+  night: { name: 'Ночной премиум', description: 'Тёмный режим с мягким свечением', themeColor: '#0d1728' }
+};
+
+function ensureUiPreferences() {
+  if (!state.uiPreferences || typeof state.uiPreferences !== 'object') state.uiPreferences = { theme: 'aurora' };
+  if (!THEME_PRESETS[state.uiPreferences.theme]) state.uiPreferences.theme = 'aurora';
+  return state.uiPreferences;
+}
+
+function activeThemeId() {
+  return ensureUiPreferences().theme || 'aurora';
+}
+
+function applyTheme(themeId = activeThemeId()) {
+  const selected = THEME_PRESETS[themeId] ? themeId : 'aurora';
+  ensureUiPreferences().theme = selected;
+  document.body.dataset.theme = selected;
+  document.documentElement.dataset.theme = selected;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', THEME_PRESETS[selected].themeColor);
+  const label = byId('activeThemeName');
+  if (label) label.textContent = `Фон: ${THEME_PRESETS[selected].name}`;
+}
+
+function renderThemeOptions() {
+  const target = byId('themeOptions');
+  if (!target) return;
+  const current = activeThemeId();
+  target.innerHTML = Object.entries(THEME_PRESETS).map(([id, theme]) => `
+    <button class="theme-card ${id === current ? 'active' : ''}" data-theme-choice="${id}" type="button">
+      <span class="theme-card-preview theme-card-preview--${id}"></span>
+      <span class="theme-card-copy">
+        <strong>${theme.name}</strong>
+        <small>${theme.description}</small>
+      </span>
+    </button>
+  `).join('');
+  const shortcut = byId('activeThemeName');
+  if (shortcut) shortcut.textContent = `Фон: ${THEME_PRESETS[current].name}`;
+}
+
+function setAppTheme(themeId) {
+  const selected = THEME_PRESETS[themeId] ? themeId : 'aurora';
+  ensureUiPreferences().theme = selected;
+  applyTheme(selected);
+  renderThemeOptions();
+  saveState();
+}
 
 
 function migrateStoredState(raw) {
@@ -127,6 +182,11 @@ function migrateStoredState(raw) {
     });
     version = 10;
   }
+  if (version < 12) {
+    saved.uiPreferences = saved.uiPreferences && typeof saved.uiPreferences === 'object' ? saved.uiPreferences : { theme: 'aurora' };
+    if (!saved.uiPreferences.theme) saved.uiPreferences.theme = 'aurora';
+    version = 12;
+  }
   saved.schemaVersion = CURRENT_SCHEMA_VERSION;
   return saved;
 }
@@ -180,10 +240,11 @@ function loadState() {
       forecastSettings: saved?.forecastSettings && typeof saved.forecastSettings === "object" ? saved.forecastSettings : { reserve: 0, horizonDays: 30 },
       importRules: Array.isArray(saved?.importRules) ? saved.importRules : [],
       reconciliationReviewed: saved?.reconciliationReviewed && typeof saved.reconciliationReviewed === "object" ? saved.reconciliationReviewed : {},
-      assets: Array.isArray(saved?.assets) ? saved.assets : []
+      assets: Array.isArray(saved?.assets) ? saved.assets : [],
+      uiPreferences: saved?.uiPreferences && typeof saved.uiPreferences === 'object' ? saved.uiPreferences : { theme: 'aurora' }
     };
   } catch {}
-  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], shoppingAliases: {}, financialProducts: [], insurancePolicies: [], alimonyRules: [], regularPayments: [], plannedPaymentStates: {}, familyMembers: [], activeMemberId: "family-tatiana", familyActivityLog: [], budgetPlans: [], savingsGoals: [], forecastSettings: { reserve: 0, horizonDays: 30 }, importRules: [], reconciliationReviewed: {}, assets: [] };
+  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], shoppingAliases: {}, financialProducts: [], insurancePolicies: [], alimonyRules: [], regularPayments: [], plannedPaymentStates: {}, familyMembers: [], activeMemberId: "family-tatiana", familyActivityLog: [], budgetPlans: [], savingsGoals: [], forecastSettings: { reserve: 0, horizonDays: 30 }, importRules: [], reconciliationReviewed: {}, assets: [], uiPreferences: { theme: 'aurora' } };
 }
 
 function saveState() {
@@ -213,7 +274,8 @@ function saveState() {
     forecastSettings: state.forecastSettings,
     importRules: state.importRules,
     reconciliationReviewed: state.reconciliationReviewed,
-    assets: state.assets
+    assets: state.assets,
+    uiPreferences: state.uiPreferences
   }));
   localStorage.setItem(`${storeKey}.lastSavedAt`, savedAt);
   updateDatabaseStatus();
@@ -882,7 +944,126 @@ function renderNotificationCenterBadge() {
   byId("notificationCenterBtn")?.classList.toggle("has-notifications", count > 0);
 }
 
+
+// ===== Пакет 11: системные уведомления Android =====
+function nativeNotificationDateTime(dateText, hour = 9, minute = 0) {
+  const date = new Date(`${dateText}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return 0;
+  date.setHours(hour, minute, 0, 0);
+  return date.getTime();
+}
+
+function nativeNotificationItems() {
+  const todayText = dateLocal(new Date());
+  const now = Date.now();
+  const max = now + 120 * 86400000;
+  const items = [];
+  const add = (id, dateText, daysBefore, title, body, kind) => {
+    if (!dateText) return;
+    const triggerDate = new Date(`${dateText}T00:00:00`);
+    if (Number.isNaN(triggerDate.getTime())) return;
+    triggerDate.setDate(triggerDate.getDate() - Math.max(0, Number(daysBefore) || 0));
+    const triggerText = dateLocal(triggerDate);
+    let triggerAt = nativeNotificationDateTime(triggerText, 9, 0);
+    if (triggerText === todayText && triggerAt <= now) triggerAt = now + 5000;
+    if (triggerAt < now || triggerAt > max) return;
+    items.push({ id: `${id}@${triggerText}`, triggerAt, title, body, kind });
+  };
+
+  regularOccurrences(0, 4).forEach((item) => {
+    if (occurrenceStatus(item) === 'paid' || item.dueDate < todayText) return;
+    const days = Number(item.remindDays ?? (item.paymentType === 'loan' || item.paymentType === 'utilities' ? 3 : 1));
+    const typeLabel = item.eventKind === 'meter-reading' ? 'Показания' : (regularTypeLabels[item.paymentType] || 'Платёж');
+    const amount = Number(item.amount || 0) > 0 ? ` • ${money(item.amount)}` : '';
+    add(`payment-${item.occurrenceId}`, item.dueDate, days, `${typeLabel}: ${item.name}`, `Срок ${formatTransactionDate(item.dueDate)}${amount}`, item.paymentType || 'payment');
+    if (days > 0) add(`payment-day-${item.occurrenceId}`, item.dueDate, 0, `${typeLabel} сегодня: ${item.name}`, amount ? `К оплате ${money(item.amount)}` : 'Откройте ФинПорядок и отметьте выполнение', item.paymentType || 'payment');
+  });
+
+  insuranceReminderPolicies().forEach((policy) => {
+    if (policy.daysLeft >= 0) add(`insurance-${policy.id}`, policy.endDate, Math.min(7, Math.max(0, policy.daysLeft)), `Заканчивается страховка: ${policy.name}`, `${policy.subjectName} • ${formatTransactionDate(policy.endDate)}`, 'insurance');
+  });
+
+  financeProductClosureEvents().forEach((product) => {
+    if (!product.endDate) return;
+    const noun = product.type === 'loan' ? 'кредит' : 'вклад';
+    add(`maturity-${product.id}`, product.endDate, 3, `Через 3 дня заканчивается ${noun}`, product.name, 'finance-product');
+    add(`maturity-day-${product.id}`, product.endDate, 0, product.type === 'loan' ? 'Сегодня закрывается кредит 🎉' : 'Сегодня заканчивается вклад ✨', product.name, 'finance-product');
+  });
+
+  assetVisibleItems().forEach((asset) => {
+    assetDeadlineItems(asset).forEach((deadline) => {
+      add(`asset-${asset.id}-${deadline.label}`, deadline.date, 30, `${asset.name}: ${deadline.label}`, `Срок ${formatTransactionDate(deadline.date)}`, 'asset');
+      add(`asset-week-${asset.id}-${deadline.label}`, deadline.date, 7, `${asset.name}: срок через неделю`, deadline.label, 'asset');
+    });
+  });
+
+  state.regularPayments.filter((item) => item.paymentType === 'subscription' && item.subscriptionStatus !== 'cancelled').forEach((item) => {
+    if (item.trialEndDate) add(`trial-${item.id}`, item.trialEndDate, Math.max(1, Number(item.remindDays) || 3), `Заканчивается пробный период: ${item.name}`, formatTransactionDate(item.trialEndDate), 'subscription');
+  });
+
+  const unique = new Map();
+  items.forEach((item) => unique.set(item.id, item));
+  return [...unique.values()].sort((a, b) => a.triggerAt - b.triggerAt).slice(0, 250);
+}
+
+function syncNativeNotifications() {
+  const bridge = window.AndroidNotifications;
+  const items = nativeNotificationItems();
+  const count = byId('nativeNotificationScheduleCount');
+  if (count) count.textContent = `${items.length} запланировано`;
+  if (!bridge || typeof bridge.sync !== 'function') {
+    const status = byId('nativeNotificationStatus');
+    if (status) status.textContent = 'Системные уведомления доступны в Android-приложении.';
+    byId('enableNativeNotificationsBtn')?.setAttribute('hidden', '');
+    return;
+  }
+  try {
+    bridge.sync(JSON.stringify(items));
+    const enabled = typeof bridge.areEnabled === 'function' ? bridge.areEnabled() : false;
+    window.onNativeNotificationState(Boolean(enabled), '');
+  } catch (error) {
+    const status = byId('nativeNotificationStatus');
+    if (status) status.textContent = `Не удалось обновить расписание: ${error.message || error}`;
+  }
+}
+
+window.onNativeNotificationState = function(enabled, message = '') {
+  const status = byId('nativeNotificationStatus');
+  const button = byId('enableNativeNotificationsBtn');
+  if (status) status.textContent = message || (enabled ? 'Разрешены. Расписание обновляется автоматически.' : 'Отключены. Нажмите «Включить» и разрешите уведомления Android.');
+  if (button) {
+    button.hidden = Boolean(enabled);
+    button.textContent = 'Включить';
+  }
+};
+
+byId('enableNativeNotificationsBtn')?.addEventListener('click', () => {
+  if (window.AndroidNotifications?.requestPermission) window.AndroidNotifications.requestPermission();
+  else alert('Системные уведомления доступны только в Android-приложении.');
+});
+
+document.addEventListener('click', (event) => {
+  const themeChoice = event.target.closest('[data-theme-choice]');
+  if (themeChoice) {
+    event.preventDefault();
+    setAppTheme(themeChoice.dataset.themeChoice);
+    return;
+  }
+  if (event.target.closest('#themeResetBtn')) {
+    event.preventDefault();
+    setAppTheme('aurora');
+    return;
+  }
+  if (event.target.closest('#openThemeSettingsBtn')) {
+    event.preventDefault();
+    setView('settings');
+    setTimeout(() => byId('appearancePanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  }
+});
+
 function render() {
+  applyTheme();
+  renderThemeOptions();
   renderMeta();
   renderFilters();
   renderDashboard();
@@ -907,6 +1088,7 @@ function render() {
   renderImportArchive();
   renderFamilyAccess();
   applyFamilyPermissions();
+  setTimeout(syncNativeNotifications, 0);
 }
 
 
@@ -2007,6 +2189,116 @@ function renderAccountBars(rows) {
   target.innerHTML = items.length ? items.map((item) => `<button class="account-bar drill-card" data-drill-kind="account" data-drill-value="${escapeHtml(item.name)}"><span>${accountPill(item.name)}</span><div><i style="width:${Math.max(3, Math.round(item.total/max*100))}%"></i></div><b>${money(item.total)}</b></button>`).join("") : `<div class="empty-state">Нет расходов по счетам</div>`;
 }
 
+
+function analyticsLoanBalance(product) {
+  if (!product || product.type !== "loan") return 0;
+  const direct = Number(product.remainingBalance);
+  if (Number.isFinite(direct) && direct >= 0) return direct;
+  const principal = Number(product.principal || product.amount || 0);
+  const paidPrincipal = (product.actualPayments || []).reduce((sum, payment) => sum + Number(payment.principal || 0), 0);
+  return Math.max(0, principal - paidPrincipal);
+}
+
+function analyticsSnapshot(rows) {
+  const operational = rows.filter((row) => typeOf(row) !== "transfer");
+  const income = operational.filter((row) => Number(row.amount) > 0).reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const expense = operational.filter((row) => Number(row.amount) < 0).reduce((sum, row) => sum + Math.abs(Number(row.amount || 0)), 0);
+  const net = income - expense;
+  const liquid = accountSummaries().reduce((sum, item) => sum + Number(item.balance || 0), 0);
+  const assetValue = (state.assets || []).reduce((sum, asset) => sum + Number(asset.currentValue || asset.purchasePrice || asset.value || 0), 0);
+  const debt = (state.financialProducts || []).reduce((sum, product) => sum + analyticsLoanBalance(product), 0);
+  const monthlyDebtPayments = (state.financialProducts || []).filter((product) => product.type === "loan" && product.status !== "closed").reduce((sum, product) => sum + Number(product.monthlyPayment || product.paymentAmount || 0), 0);
+  const days = Math.max(1, Math.round((reportPeriodRange().end - reportPeriodRange().start) / 86400000) + 1);
+  const monthlyIncome = income / days * 30.44;
+  const monthlyExpense = expense / days * 30.44;
+  const goals = (state.savingsGoals || []).filter((goal) => Number(goal.target || 0) > 0);
+  const goalTarget = goals.reduce((sum, goal) => sum + Number(goal.target || 0), 0);
+  const goalCurrent = goals.reduce((sum, goal) => sum + Math.min(Number(goal.current || 0), Number(goal.target || 0)), 0);
+  return {
+    income, expense, net, liquid, assetValue, debt,
+    netWorth: liquid + assetValue - debt,
+    savingsRate: income > 0 ? net / income * 100 : 0,
+    debtLoad: monthlyIncome > 0 ? monthlyDebtPayments / monthlyIncome * 100 : 0,
+    runway: monthlyExpense > 0 ? Math.max(0, liquid) / monthlyExpense : 0,
+    goals, goalTarget, goalCurrent,
+    goalProgress: goalTarget > 0 ? goalCurrent / goalTarget * 100 : 0
+  };
+}
+
+function analyticsInsightCard(title, text, tone = "neutral") {
+  return `<article class="analytics-insight ${tone}"><div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(text)}</small></div></article>`;
+}
+
+function renderAdvancedAnalytics(rows) {
+  const snapshot = analyticsSnapshot(rows);
+  byId("analyticsNetFlow").textContent = money(snapshot.net);
+  byId("analyticsNetFlow").classList.toggle("negative", snapshot.net < 0);
+  byId("analyticsSavingsRate").textContent = `${Math.round(snapshot.savingsRate)}%`;
+  byId("analyticsNetWorth").textContent = money(snapshot.netWorth);
+  byId("analyticsDebtLoad").textContent = `${Math.round(snapshot.debtLoad)}%`;
+  byId("analyticsRunway").textContent = `${snapshot.runway.toFixed(snapshot.runway < 10 ? 1 : 0)} мес.`;
+  byId("analyticsGoalsProgress").textContent = `${Math.round(snapshot.goalProgress)}%`;
+  byId("analyticsGoalsMeta").textContent = snapshot.goals.length ? `${snapshot.goals.length} целей • ${money(snapshot.goalCurrent)} из ${money(snapshot.goalTarget)}` : "цели не созданы";
+
+  const insights = [];
+  if (!rows.length) insights.push(analyticsInsightCard("Недостаточно данных", "Добавьте или импортируйте операции, чтобы получить персональные выводы."));
+  else {
+    insights.push(snapshot.net >= 0
+      ? analyticsInsightCard("Период закрыт в плюс", `Свободный денежный поток составил ${money(snapshot.net)}.`, "good")
+      : analyticsInsightCard("Расходы выше доходов", `Дефицит за период составляет ${money(Math.abs(snapshot.net))}.`, "warning"));
+    if (snapshot.savingsRate >= 20) insights.push(analyticsInsightCard("Хороший темп накоплений", `Сохраняется около ${Math.round(snapshot.savingsRate)}% дохода.`, "good"));
+    else if (snapshot.income > 0) insights.push(analyticsInsightCard("Низкая норма сбережений", `Сейчас остаётся около ${Math.round(snapshot.savingsRate)}% дохода. Стоит проверить крупные категории расходов.`, "warning"));
+    if (snapshot.debtLoad > 40) insights.push(analyticsInsightCard("Высокая долговая нагрузка", `Оценочно ${Math.round(snapshot.debtLoad)}% среднемесячного дохода уходит на кредиты.`, "warning"));
+    else if (snapshot.debt > 0) insights.push(analyticsInsightCard("Долги под контролем", `Остаток по кредитам: ${money(snapshot.debt)}, нагрузка около ${Math.round(snapshot.debtLoad)}%.`, "neutral"));
+    if (snapshot.runway < 1 && snapshot.expense > 0) insights.push(analyticsInsightCard("Маленький резерв", "Ликвидных денег меньше чем на один обычный месяц расходов.", "warning"));
+    else if (snapshot.runway >= 3) insights.push(analyticsInsightCard("Есть финансовая подушка", `Резерва хватит примерно на ${snapshot.runway.toFixed(1)} месяца обычных расходов.`, "good"));
+  }
+  byId("analyticsInsights").innerHTML = insights.join("");
+
+  const expenses = rows.filter((row) => Number(row.amount) < 0 && typeOf(row) !== "transfer");
+  const amounts = expenses.map((row) => Math.abs(Number(row.amount || 0))).sort((a,b)=>a-b);
+  const median = amounts.length ? amounts[Math.floor(amounts.length / 2)] : 0;
+  const threshold = Math.max(median * 3, amounts.reduce((a,b)=>a+b,0) / Math.max(1, amounts.length) * 2);
+  const anomalies = expenses.filter((row) => Math.abs(Number(row.amount || 0)) >= threshold && Math.abs(Number(row.amount || 0)) > 0).sort((a,b)=>Math.abs(b.amount)-Math.abs(a.amount)).slice(0,8);
+  byId("analyticsAnomalies").innerHTML = anomalies.length
+    ? anomalies.map((row) => `<article class="row"><div><strong>${escapeHtml(row.description || row.payee || "Расход")}</strong><small>${escapeHtml(row.date || "Без даты")} • ${escapeHtml(categoryRoot(row) || "Без категории")} • ${escapeHtml(row.account || "Без счёта")}</small></div><b>${money(Math.abs(row.amount))}</b></article>`).join("")
+    : `<div class="empty-state">Крупных выбросов относительно обычных расходов не найдено.</div>`;
+}
+
+function finalApplicationTests() {
+  const tests = [];
+  const add = (name, pass, details) => tests.push({ name, pass:Boolean(pass), details });
+  add("Основная база загружена", Array.isArray(state.rows), `${state.rows?.length || 0} операций`);
+  add("Справочник счетов доступен", Array.isArray(state.accounts), `${state.accounts?.length || 0} счетов`);
+  add("Категории доступны", Array.isArray(state.categories), `${state.categories?.length || 0} категорий`);
+  add("Регулярные платежи доступны", Array.isArray(state.regularPayments), `${state.regularPayments?.length || 0} платежей`);
+  add("Кредиты и вклады доступны", Array.isArray(state.financialProducts), `${state.financialProducts?.length || 0} продуктов`);
+  add("Имущество доступно", Array.isArray(state.assets), `${state.assets?.length || 0} объектов`);
+  add("Семейные профили доступны", Array.isArray(state.familyMembers) && state.familyMembers.length > 0, `${state.familyMembers?.length || 0} профилей`);
+  add("Резервное сохранение работает", typeof saveState === "function" && Boolean(storeKey), storeKey);
+  add("Форма имущества присутствует", Boolean(byId("assetInlineForm") || byId("assetForm")), "Проверка формы создания имущества");
+  add("Раздел отчётов присутствует", Boolean(byId("reports") && byId("reportPeriod")), "Проверка аналитического интерфейса");
+  add("Системные уведомления подключены", typeof window.FinPoryadokNotifications !== "undefined" || typeof scheduleAndroidNotifications === "function" || Boolean(window.AndroidNotifications), "Проверка JS/native-моста");
+  const db = diagnoseDatabase();
+  add("Нет критических ошибок данных", !db.issues.some((issue) => issue.severity === "error"), `${db.issues.filter((issue)=>issue.severity==="error").length} критических ошибок`);
+  return { generatedAt:new Date().toISOString(), appVersion:"0.19.0", schemaVersion:CURRENT_SCHEMA_VERSION, passed:tests.filter(t=>t.pass).length, total:tests.length, tests, diagnostics:db };
+}
+
+function renderFinalTests() {
+  const report = finalApplicationTests();
+  window.__finporyadokFinalTestReport = report;
+  byId("finalTestSummary").innerHTML = `<strong>${report.passed} из ${report.total} проверок пройдено</strong><span>${report.passed === report.total ? "Ключевые функции готовы" : "Есть пункты, требующие проверки"}</span>`;
+  byId("finalTestResults").innerHTML = report.tests.map((test) => `<article class="final-test-item ${test.pass ? "passed" : "failed"}"><span>${test.pass ? "✓" : "!"}</span><div><strong>${escapeHtml(test.name)}</strong><small>${escapeHtml(test.details || "")}</small></div></article>`).join("");
+  return report;
+}
+
+function exportAdvancedAnalytics() {
+  const range = rowsInReportPeriod();
+  const snapshot = analyticsSnapshot(range.rows);
+  const report = { generatedAt:new Date().toISOString(), period:{label:range.label,start:range.start.toISOString(),end:range.end.toISOString()}, metrics:snapshot, categories:summarizeRows(range.rows, categoryRoot, row=>row.amount<0), projects:summarizeRows(range.rows,row=>row.project||"",row=>row.amount<0&&row.project), diagnostics:diagnoseDatabase() };
+  downloadBlob(new Blob([JSON.stringify(report,null,2)],{type:"application/json;charset=utf-8"}),`finporyadok-analytics-${safeFileDate()}.json`);
+}
+
 function renderReports() {
   const range = rowsInReportPeriod();
   const expenses = range.rows.filter((row) => row.amount < 0);
@@ -2025,6 +2317,7 @@ function renderReports() {
   renderIncomeExpenseChart(range.rows);
   renderMonthlyLineChart(range.rows);
   renderAccountBars(range.rows);
+  renderAdvancedAnalytics(range.rows);
   byId("reportCategories").innerHTML = categories.length
     ? categories.map((item) => reportShareRow(item, totalExpense, "category")).join("")
     : `<article class="row"><div><strong>Нет расходов</strong><small>Выберите другой период или импортируйте операции.</small></div><b>-</b></article>`;
@@ -4724,6 +5017,10 @@ function downloadDiagnosticsReport() {
   downloadBlob(new Blob([JSON.stringify(report,null,2)],{type:"application/json;charset=utf-8"}),`finporyadok-diagnostics-${safeFileDate()}.json`);
 }
 
+byId("runFinalTestsBtn")?.addEventListener("click", renderFinalTests);
+byId("downloadFinalTestsBtn")?.addEventListener("click",()=>{ const report=window.__finporyadokFinalTestReport || renderFinalTests(); downloadBlob(new Blob([JSON.stringify(report,null,2)],{type:"application/json;charset=utf-8"}),`finporyadok-final-tests-${safeFileDate()}.json`); });
+byId("exportAnalyticsBtn")?.addEventListener("click", exportAdvancedAnalytics);
+
 byId("runDiagnosticsBtn")?.addEventListener("click", renderDiagnostics);
 byId("repairDiagnosticsBtn")?.addEventListener("click", repairSafeDatabaseIssues);
 byId("downloadDiagnosticsBtn")?.addEventListener("click", downloadDiagnosticsReport);
@@ -4739,6 +5036,7 @@ byId("restoreLatestSnapshotBtn")?.addEventListener("click",()=>{
 
 cleanupImportedPdfAccounts();
 initializeDashboardDateRange();
+applyTheme();
 render();
 
 byId("nativeReceiptScanBtn")?.addEventListener("click", () => {
@@ -5247,8 +5545,20 @@ function isUtilityPaymentTemplate(item) {
 }
 
 function utilityPaymentTemplates() {
+  // Для привязки к дому показываем ВСЕ созданные регулярные платежи.
+  // Раньше список проходил через распознавание типа/названия и из-за старых
+  // значений paymentType часть уже созданных платежей ошибочно скрывалась.
   const rows = Array.isArray(state.regularPayments) ? state.regularPayments : [];
-  return rows.filter(isUtilityPaymentTemplate);
+  const subscriptions = Array.isArray(state.subscriptions) ? state.subscriptions : [];
+  const combined = [...rows, ...subscriptions];
+  const seen = new Set();
+  return combined.filter((item) => {
+    if (!item || typeof item !== 'object') return false;
+    const id = String(item.id || '').trim();
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }
 
 function assetLinkedUtilities(asset) {
@@ -5276,7 +5586,7 @@ function renderAssetUtilityChecks(asset = null) {
   const utilities = utilityPaymentTemplates();
   target.innerHTML = utilities.length
     ? utilities.map((item) => `<label class="asset-link-check"><input type="checkbox" name="utilityPaymentIds" value="${escapeHtml(item.id)}" ${selected.has(item.id) ? 'checked' : ''}><span><strong>${escapeHtml(item.name)}</strong><small>${money(item.amount)} • ${escapeHtml(item.frequency || 'регулярно')}</small></span></label>`).join('')
-    : '<p class="muted">Сначала создайте коммунальные платежи, интернет или подписки в разделах «Календарь» и «Вклады и кредиты».</p>';
+    : '<p class="muted">Регулярные платежи пока не найдены. Создайте их в разделе «Календарь платежей» или в блоке «Подписки».</p>';
 }
 
 function updateAssetLinkFields() {
