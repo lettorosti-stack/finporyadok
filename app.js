@@ -28,7 +28,7 @@ const state = {
   importRules: Array.isArray(savedState.importRules) ? savedState.importRules : [],
   reconciliationReviewed: savedState.reconciliationReviewed && typeof savedState.reconciliationReviewed === "object" ? savedState.reconciliationReviewed : {},
   assets: Array.isArray(savedState.assets) ? savedState.assets : [],
-  uiPreferences: savedState.uiPreferences && typeof savedState.uiPreferences === 'object' ? savedState.uiPreferences : { theme: 'aurora' },
+  uiPreferences: savedState.uiPreferences && typeof savedState.uiPreferences === 'object' ? savedState.uiPreferences : { theme: 'mint' },
   shopping: savedState.shopping.length ? savedState.shopping : [
     { name: "Молоко", qty: "2 л", days: 4, price: 92 },
     { name: "Корм", qty: "3 кг", days: 26, price: 1450 },
@@ -61,60 +61,10 @@ const views = {
   settings: ["Настройки", "Офлайн-режим, синхронизация и безопасность."]
 };
 
-const THEME_PRESETS = {
-  aurora: { name: 'Северное сияние', description: 'Лёгкий фиолетово-бирюзовый фон', themeColor: '#6c63ff' },
-  pearl: { name: 'Светлая классика', description: 'Чистый голубой минимализм', themeColor: '#2f80ed' },
-  sand: { name: 'Тёплый беж', description: 'Спокойный домашний фон', themeColor: '#c7794c' },
-  garden: { name: 'Садовый мятный', description: 'Свежий зелёный акцент', themeColor: '#1f8b72' },
-  night: { name: 'Ночной премиум', description: 'Тёмный режим с мягким свечением', themeColor: '#0d1728' }
-};
 
-function ensureUiPreferences() {
-  if (!state.uiPreferences || typeof state.uiPreferences !== 'object') state.uiPreferences = { theme: 'aurora' };
-  if (!THEME_PRESETS[state.uiPreferences.theme]) state.uiPreferences.theme = 'aurora';
-  return state.uiPreferences;
-}
-
-function activeThemeId() {
-  return ensureUiPreferences().theme || 'aurora';
-}
-
-function applyTheme(themeId = activeThemeId()) {
-  const selected = THEME_PRESETS[themeId] ? themeId : 'aurora';
-  ensureUiPreferences().theme = selected;
-  document.body.dataset.theme = selected;
-  document.documentElement.dataset.theme = selected;
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', THEME_PRESETS[selected].themeColor);
-  const label = byId('activeThemeName');
-  if (label) label.textContent = `Фон: ${THEME_PRESETS[selected].name}`;
-}
-
-function renderThemeOptions() {
-  const target = byId('themeOptions');
-  if (!target) return;
-  const current = activeThemeId();
-  target.innerHTML = Object.entries(THEME_PRESETS).map(([id, theme]) => `
-    <button class="theme-card ${id === current ? 'active' : ''}" data-theme-choice="${id}" type="button">
-      <span class="theme-card-preview theme-card-preview--${id}"></span>
-      <span class="theme-card-copy">
-        <strong>${theme.name}</strong>
-        <small>${theme.description}</small>
-      </span>
-    </button>
-  `).join('');
-  const shortcut = byId('activeThemeName');
-  if (shortcut) shortcut.textContent = `Фон: ${THEME_PRESETS[current].name}`;
-}
-
-function setAppTheme(themeId) {
-  const selected = THEME_PRESETS[themeId] ? themeId : 'aurora';
-  ensureUiPreferences().theme = selected;
-  applyTheme(selected);
-  renderThemeOptions();
-  saveState();
-}
-
+const UI_THEMES={mint:{name:'Мятный'},sky:{name:'Небесный'},sand:{name:'Тёплый'},night:{name:'Ночной'}};
+function applyUiTheme(){const id=state.uiPreferences?.theme||'mint';document.body.dataset.theme=UI_THEMES[id]?id:'mint';}
+function renderThemeOptions(){const box=byId('themeOptions');if(!box)return;const active=state.uiPreferences?.theme||'mint';box.innerHTML=Object.entries(UI_THEMES).map(([id,t])=>`<button class="theme-option ${id===active?'active':''}" data-ui-theme="${id}" type="button"><strong>${t.name}</strong><small>Фон приложения</small></button>`).join('');}
 
 function migrateStoredState(raw) {
   const saved = raw && typeof raw === "object" ? structuredCloneSafe(raw) : {};
@@ -182,11 +132,6 @@ function migrateStoredState(raw) {
     });
     version = 10;
   }
-  if (version < 12) {
-    saved.uiPreferences = saved.uiPreferences && typeof saved.uiPreferences === 'object' ? saved.uiPreferences : { theme: 'aurora' };
-    if (!saved.uiPreferences.theme) saved.uiPreferences.theme = 'aurora';
-    version = 12;
-  }
   saved.schemaVersion = CURRENT_SCHEMA_VERSION;
   return saved;
 }
@@ -241,10 +186,10 @@ function loadState() {
       importRules: Array.isArray(saved?.importRules) ? saved.importRules : [],
       reconciliationReviewed: saved?.reconciliationReviewed && typeof saved.reconciliationReviewed === "object" ? saved.reconciliationReviewed : {},
       assets: Array.isArray(saved?.assets) ? saved.assets : [],
-      uiPreferences: saved?.uiPreferences && typeof saved.uiPreferences === 'object' ? saved.uiPreferences : { theme: 'aurora' }
+      uiPreferences: saved?.uiPreferences && typeof saved.uiPreferences === 'object' ? saved.uiPreferences : { theme: 'mint' }
     };
   } catch {}
-  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], shoppingAliases: {}, financialProducts: [], insurancePolicies: [], alimonyRules: [], regularPayments: [], plannedPaymentStates: {}, familyMembers: [], activeMemberId: "family-tatiana", familyActivityLog: [], budgetPlans: [], savingsGoals: [], forecastSettings: { reserve: 0, horizonDays: 30 }, importRules: [], reconciliationReviewed: {}, assets: [], uiPreferences: { theme: 'aurora' } };
+  return { rows: seedRows, accounts: [], categories: [], importArchive: [], shopping: [], shoppingAliases: {}, financialProducts: [], insurancePolicies: [], alimonyRules: [], regularPayments: [], plannedPaymentStates: {}, familyMembers: [], activeMemberId: "family-tatiana", familyActivityLog: [], budgetPlans: [], savingsGoals: [], forecastSettings: { reserve: 0, horizonDays: 30 }, importRules: [], reconciliationReviewed: {}, assets: [], uiPreferences: { theme: 'mint' } };
 }
 
 function saveState() {
@@ -1042,27 +987,8 @@ byId('enableNativeNotificationsBtn')?.addEventListener('click', () => {
   else alert('Системные уведомления доступны только в Android-приложении.');
 });
 
-document.addEventListener('click', (event) => {
-  const themeChoice = event.target.closest('[data-theme-choice]');
-  if (themeChoice) {
-    event.preventDefault();
-    setAppTheme(themeChoice.dataset.themeChoice);
-    return;
-  }
-  if (event.target.closest('#themeResetBtn')) {
-    event.preventDefault();
-    setAppTheme('aurora');
-    return;
-  }
-  if (event.target.closest('#openThemeSettingsBtn')) {
-    event.preventDefault();
-    setView('settings');
-    setTimeout(() => byId('appearancePanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
-  }
-});
-
 function render() {
-  applyTheme();
+  applyUiTheme();
   renderThemeOptions();
   renderMeta();
   renderFilters();
@@ -5036,7 +4962,6 @@ byId("restoreLatestSnapshotBtn")?.addEventListener("click",()=>{
 
 cleanupImportedPdfAccounts();
 initializeDashboardDateRange();
-applyTheme();
 render();
 
 byId("nativeReceiptScanBtn")?.addEventListener("click", () => {
@@ -5833,3 +5758,9 @@ const package104AddAssetButton = document.getElementById('addAssetBtn');
 if (package104AddAssetButton) {
   package104AddAssetButton.onclick = window.openAssetFormDirect;
 }
+
+
+// Package 13.1 mobile navigation
+function syncMobileNavigation(viewId){document.querySelectorAll('.mobile-bottom-nav [data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===viewId));}
+document.addEventListener('click',event=>{const theme=event.target.closest('[data-ui-theme]');if(theme){state.uiPreferences=state.uiPreferences||{};state.uiPreferences.theme=theme.dataset.uiTheme;applyUiTheme();renderThemeOptions();saveState();return;}const nav=event.target.closest('.mobile-bottom-nav [data-view]');if(nav){event.preventDefault();setView(nav.dataset.view);syncMobileNavigation(nav.dataset.view);return;}if(event.target.closest('#mobileAddTxBtn')){event.preventDefault();byId('addTxBtn')?.click();}});
+const __setViewOriginal=setView;setView=function(id){const r=__setViewOriginal(id);syncMobileNavigation(id);return r;};syncMobileNavigation(document.querySelector('.view.active')?.id||'dashboard');

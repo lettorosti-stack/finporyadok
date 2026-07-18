@@ -57,7 +57,7 @@
 </div>
 <div class="top-actions">
 <input id="searchInput" placeholder="Найти операцию, магазин, проект или счёт" type="search"/>
-<button class="family-profile-button" id="activeFamilyProfileBtn" type="button"><span class="family-avatar family-avatar--teal">Т</span><span>Татьяна</span></button><button class="ghost theme-shortcut-button" id="openThemeSettingsBtn" type="button"><span>🎨</span><span id="activeThemeName">Фон: Северное сияние</span></button><button class="ghost" id="exportBtn">Экспорт</button>
+<button class="family-profile-button" id="activeFamilyProfileBtn" type="button"><span class="family-avatar family-avatar--teal">Т</span><span>Татьяна</span></button><button class="ghost" id="exportBtn">Экспорт</button>
 <button class="primary" id="addTxBtn">+ Операция</button>
 </div>
 </header>
@@ -672,33 +672,9 @@
 </section>
 
 <section class="view" id="settings">
-<section class="panel design-system-panel" id="appearancePanel">
-  <div class="panel-head">
-    <div>
-      <span class="eyebrow">Дизайн и навигация</span>
-      <h2>Современный внешний вид</h2>
-      <p>Выберите фон приложения и общий визуальный характер. Изменения применяются сразу ко всем разделам.</p>
-    </div>
-    <button class="ghost" id="themeResetBtn" type="button">Стандартный фон</button>
-  </div>
-  <div class="theme-switcher" id="themeOptions"></div>
-  <div class="theme-guide-grid">
-    <article class="card theme-guide-card">
-      <div class="backup-card-icon">🧭</div>
-      <h3>Понятная навигация</h3>
-      <p>Активный раздел выделяется сильнее, ключевые действия подняты наверх, а карточки читаются легче.</p>
-    </article>
-    <article class="card theme-guide-card">
-      <div class="backup-card-icon">✨</div>
-      <h3>Мягкий современный UI</h3>
-      <p>Стеклянные панели, больше воздуха, плавные акценты и улучшенная иерархия текста.</p>
-    </article>
-    <article class="card theme-guide-card">
-      <div class="backup-card-icon">🎨</div>
-      <h3>Несколько фонов</h3>
-      <p>Можно выбрать светлый, тёплый, садовый или тёмный вариант — без потери читаемости данных.</p>
-    </article>
-  </div>
+<section class="panel appearance-panel" id="appearancePanel">
+<div class="panel-head"><div><span class="eyebrow">Оформление</span><h2>Фон приложения</h2><p>Выберите фон. Изменения применяются сразу.</p></div></div>
+<div class="theme-options" id="themeOptions"></div>
 </section>
 <div class="backup-hero panel">
   <div>
@@ -807,6 +783,14 @@
 <strong id="sourceName">Локальные данные</strong>
 <small id="sourceMeta">Загрузка…</small>
 </footer>
+
+<nav class="mobile-bottom-nav" aria-label="Основная навигация">
+  <button class="mobile-nav-item active" data-view="dashboard" type="button"><span class="mobile-nav-icon">⌂</span><span>Главная</span></button>
+  <button class="mobile-nav-item" data-view="accounts" type="button"><span class="mobile-nav-icon">▣</span><span>Счета</span></button>
+  <button class="mobile-nav-item mobile-nav-main-action" id="mobileAddTxBtn" type="button"><span class="mobile-nav-plus">+</span><span>Операция</span></button>
+  <button class="mobile-nav-item" data-view="shopping" type="button"><span class="mobile-nav-icon">♧</span><span>Покупки</span></button>
+  <button class="mobile-nav-item" data-view="reports" type="button"><span class="mobile-nav-icon">◔</span><span>Отчёты</span></button>
+</nav>
 </main>
 </div>
 
