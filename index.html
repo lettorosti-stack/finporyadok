@@ -56,6 +56,7 @@
 <p id="pageSubtitle">Главное о деньгах семьи — на одном экране.</p>
 </div>
 <div class="top-actions">
+<button class="mobile-menu-button" id="mobileMenuBtn" type="button" aria-label="Все разделы"><span>☰</span><span>Разделы</span></button>
 <input id="searchInput" placeholder="Найти операцию, магазин, проект или счёт" type="search"/>
 <button class="family-profile-button" id="activeFamilyProfileBtn" type="button"><span class="family-avatar family-avatar--teal">Т</span><span>Татьяна</span></button><button class="ghost" id="exportBtn">Экспорт</button>
 <button class="primary" id="addTxBtn">+ Операция</button>
@@ -116,51 +117,54 @@
 <small id="metricWorkExpenseCount">0 покупок</small>
 </article>
 </div>
-<div class="dashboard-health-chart">
-  <div class="dashboard-donut" id="dashboardCategoryDonut" aria-label="Диаграмма расходов по категориям"></div>
-  <div class="dashboard-donut-copy">
-    <strong>Расходы по категориям</strong>
-    <small id="dashboardCategoryLead">Нет расходов</small>
-    <button class="ghost" data-view-jump="reports" type="button">Подробнее</button>
-  </div>
-</div>
 <div class="finance-picture-footer">
 <span><b id="metricCount">0</b> операций</span>
 <span id="metricAverage">0 ₽ средний расход</span>
 </div>
 </div>
-<div class="dashboard-premium-layout">
-<section class="panel dashboard-accounts-panel">
+<div class="dashboard-grid" id="dashboardPrimaryGrid">
+<section class="panel" id="dashboardAccountsPanel">
 <div class="panel-head">
-<div><h2>Счета</h2></div>
-<button data-view-jump="accounts">Все счета</button>
+<div>
+<h2>Счета</h2>
+<p>Открываются по нажатию</p>
 </div>
-<div class="dashboard-account-cards" id="accountSummary"></div>
-</section>
-
-<div class="dashboard-dual-grid">
-<section class="panel dashboard-compact-panel">
-<div class="panel-head"><div><h2>Ближайшие платежи</h2></div><button data-view-jump="calendar" aria-label="Открыть календарь">⌁</button></div>
-<div class="dashboard-mini-list" id="dashboardUpcomingPayments"></div>
-<button class="dashboard-panel-link" data-view-jump="calendar" type="button">Все платежи <span>›</span></button>
-</section>
-<section class="panel dashboard-compact-panel">
-<div class="panel-head"><div><h2>Уведомления</h2></div><button id="dashboardOpenNotificationsBtn" type="button" aria-label="Открыть уведомления">⌁</button></div>
-<div class="dashboard-mini-list" id="dashboardMiniNotifications"></div>
-<button class="dashboard-panel-link" id="dashboardAllNotificationsBtn" type="button">Все уведомления <span>›</span></button>
-</section>
+<button data-view-jump="accounts">Все</button>
 </div>
-
-<section class="panel dashboard-categories-panel">
-<div class="panel-head"><div><h2>Категории</h2></div><button data-view-jump="budgets">Все категории</button></div>
+<div class="stack" id="accountSummary"></div>
+</section>
+<section class="panel" id="dashboardCategoriesPanel">
+<div class="panel-head">
+<div>
+<h2>Категории</h2>
+<p>Расшифровка затрат внутри</p>
+</div>
+<button data-view-jump="budgets">Все</button>
+</div>
 <div class="dashboard-category-grid" id="categorySummary"></div>
 </section>
-
-<section class="panel dashboard-latest-panel">
-<div class="panel-head"><div><h2>Последние операции</h2></div><button data-view-jump="transactions">Все операции</button></div>
-<div class="dashboard-transaction-list" id="dashboardLatestCards"></div>
-<div class="table-wrap dashboard-desktop-table">
-<table><thead><tr><th>Дата</th><th>Описание</th><th>Категория</th><th>Счёт</th><th>Проект</th><th class="amount">Сумма</th></tr></thead><tbody id="latestRows"></tbody></table>
+<section class="panel wide" id="dashboardLatestPanel">
+<div class="panel-head">
+<div>
+<h2>Последние операции</h2>
+<p>Нажмите на строку, чтобы увидеть детали</p>
+</div>
+<button data-view-jump="transactions">Все операции</button>
+</div>
+<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>Дата</th>
+<th>Описание</th>
+<th>Категория</th>
+<th>Счёт</th>
+<th>Проект</th>
+<th class="amount">Сумма</th>
+</tr>
+</thead>
+<tbody id="latestRows"></tbody>
+</table>
 </div>
 </section>
 </div>
@@ -435,12 +439,6 @@
 </div>
 <section class="panel analytics-health-panel">
 <div class="panel-head"><div><h2>Финансовое здоровье</h2><p>Главные показатели семьи за выбранный период</p></div><button class="secondary" id="exportAnalyticsBtn" type="button">Экспорт отчёта</button></div>
-<div class="financial-health-layout">
-<div class="financial-health-donut-card">
-  <div class="health-donut" id="analyticsHealthDonut"></div>
-  <div class="health-donut-center"><strong id="analyticsHealthTotal">0 ₽</strong><small>расходы</small></div>
-  <div class="health-category-legend" id="analyticsHealthLegend"></div>
-</div>
 <div class="analytics-kpi-grid">
 <article><span>Денежный поток</span><strong id="analyticsNetFlow">0 ₽</strong><small>доходы минус расходы</small></article>
 <article><span>Норма сбережений</span><strong id="analyticsSavingsRate">0%</strong><small>доля остатка от доходов</small></article>
@@ -449,6 +447,9 @@
 <article><span>Резерв</span><strong id="analyticsRunway">0 мес.</strong><small>на сколько хватит ликвидных денег</small></article>
 <article><span>Цели накоплений</span><strong id="analyticsGoalsProgress">0%</strong><small id="analyticsGoalsMeta">цели не созданы</small></article>
 </div>
+<div class="health-category-chart">
+<div><h3>Категории расходов</h3><p>Куда ушли деньги за выбранный период</p></div>
+<div class="donut-layout"><div class="donut-chart" id="healthCategoryDonut"></div><div class="chart-legend" id="healthCategoryLegend"></div></div>
 </div>
 </section>
 <div class="analytics-grid">
@@ -676,9 +677,13 @@
 </section>
 
 <section class="view" id="settings">
-<section class="panel appearance-panel" id="appearancePanel">
-<div class="panel-head"><div><span class="eyebrow">Оформление</span><h2>Фон приложения</h2><p>Выберите фон. Изменения применяются сразу.</p></div></div>
-<div class="theme-options" id="themeOptions"></div>
+<section class="panel display-settings-panel" id="displaySettingsPanel">
+<div class="panel-head"><div><span class="eyebrow">Отображение</span><h2>Внешний вид приложения</h2><p>Настройки применяются сразу и сохраняются на этом устройстве.</p></div></div>
+<div class="display-setting-grid">
+<label><span>Фон приложения</span><select id="uiThemeSelect"><option value="sky">Воздушный голубой</option><option value="warm">Тёплый светлый</option><option value="mint">Мятный</option><option value="plain">Белый минимализм</option><option value="dark">Тёмный</option></select></label>
+<label><span>Размер элементов</span><select id="uiDensitySelect"><option value="compact">Компактный</option><option value="comfortable">Удобный</option><option value="large">Крупный</option></select></label>
+<label class="toggle-setting"><input id="uiAnimationsToggle" type="checkbox" checked><span><strong>Плавные анимации</strong><small>Мягкие переходы между разделами и карточками</small></span></label>
+</div>
 </section>
 <div class="backup-hero panel">
   <div>
@@ -787,14 +792,6 @@
 <strong id="sourceName">Локальные данные</strong>
 <small id="sourceMeta">Загрузка…</small>
 </footer>
-
-<nav class="mobile-bottom-nav" aria-label="Основная навигация">
-  <button class="mobile-nav-item active" data-view="dashboard" type="button"><span class="mobile-nav-icon">⌂</span><span>Главная</span></button>
-  <button class="mobile-nav-item" data-view="accounts" type="button"><span class="mobile-nav-icon">▣</span><span>Счета</span></button>
-  <button class="mobile-nav-item mobile-nav-main-action" id="mobileAddTxBtn" type="button"><span class="mobile-nav-plus">+</span><span>Операция</span></button>
-  <button class="mobile-nav-item" data-view="shopping" type="button"><span class="mobile-nav-icon">♧</span><span>Покупки</span></button>
-  <button class="mobile-nav-item" data-view="reports" type="button"><span class="mobile-nav-icon">◔</span><span>Отчёты</span></button>
-</nav>
 </main>
 </div>
 
@@ -1510,6 +1507,20 @@
   setTimeout(fillInlineAssetLists, 500);
 })();
 </script>
+
+
+<div class="mobile-nav-backdrop" id="mobileNavBackdrop" hidden></div>
+<aside class="mobile-nav-drawer" id="mobileNavDrawer" aria-hidden="true">
+<div class="mobile-drawer-head"><div><strong>Все разделы</strong><small>ФинПорядок</small></div><button id="closeMobileNavBtn" type="button" aria-label="Закрыть">×</button></div>
+<div class="mobile-drawer-grid" id="mobileDrawerGrid"></div>
+</aside>
+<nav class="mobile-bottom-nav" aria-label="Основная навигация">
+<button data-mobile-view="dashboard" type="button"><img src="./assets/ui-icons/home.png" alt=""><span>Главная</span></button>
+<button data-mobile-view="accounts" type="button"><img src="./assets/ui-icons/accounts.png" alt=""><span>Счета</span></button>
+<button class="mobile-add-operation" id="mobileAddTxBtn" type="button" aria-label="Добавить операцию"><span>+</span><small>Операция</small></button>
+<button data-mobile-view="shopping" type="button"><img src="./assets/ui-icons/shopping.png" alt=""><span>Покупки</span></button>
+<button data-mobile-view="reports" type="button"><img src="./assets/ui-icons/reports.png" alt=""><span>Отчёты</span></button>
+</nav>
 
 </body>
 </html>
