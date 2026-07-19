@@ -47,6 +47,9 @@ import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
 import com.google.mlkit.vision.barcode.common.Barcode;
+import com.google.mlkit.vision.barcode.BarcodeScanner;
+import com.google.mlkit.vision.barcode.BarcodeScanning;
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions;
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanner;
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions;
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning;
@@ -93,6 +96,7 @@ public class MainActivity extends Activity {
         barcodeScanner = GmsBarcodeScanning.getClient(this, options);
 
         webView.addJavascriptInterface(new AndroidQrBridge(), "AndroidQrScanner");
+        webView.addJavascriptInterface(new AndroidQrImageBridge(), "AndroidQrImageScanner");
         webView.addJavascriptInterface(new AndroidFileBridge(), "AndroidFileBridge");
         webView.addJavascriptInterface(new AndroidOfficialDataBridge(), "AndroidOfficialDataBridge");
         webView.addJavascriptInterface(new AndroidReceiptOcrBridge(), "AndroidReceiptOcr");
@@ -211,7 +215,55 @@ public class MainActivity extends Activity {
     }
 
 
+    public final class AndroidQrImageBridge {
+        @JavascriptInterface
+        public void recognizeBase64(String base64) {
+            runOnUiThread(() -> {
+                BarcodeScanner scanner = null;
+                try {
+                    byte[] bytes = Base64.decode(base64, Base64.DEFAULT);
+                    Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                    if (bitmap == null) {
+                        sendQrImageError("Не удалось открыть изображение чека.");
+                        return;
+                    }
+                    BarcodeScannerOptions options = new BarcodeScannerOptions.Builder()
+                            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                            .build();
+                    scanner = BarcodeScanning.getClient(options);
+                    final BarcodeScanner finalScanner = scanner;
+                    com.google.mlkit.vision.common.InputImage image = com.google.mlkit.vision.common.InputImage.fromBitmap(bitmap, 0);
+                    scanner.process(image)
+                            .addOnSuccessListener(barcodes -> {
+                                String value = "";
+                                for (Barcode barcode : barcodes) {
+                                    String raw = barcode.getRawValue();
+                                    if (raw != null && !raw.trim().isEmpty()) { value = raw; break; }
+                                }
+                                if (value.isEmpty()) sendQrImageError("QR-код на изображении не найден.");
+                                else {
+                                    final String finalValue = value;
+                                    String js = "window.onNativeQrImageScanned(" + JSONObject.quote(finalValue) + ");";
+                                    webView.post(() -> webView.evaluateJavascript(js, null));
+                                }
+                                finalScanner.close();
+                            })
+                            .addOnFailureListener(error -> {
+                                sendQrImageError(error.getMessage() == null ? "Не удалось распознать QR на изображении." : error.getMessage());
+                                finalScanner.close();
+                            });
+                } catch (Exception error) {
+                    if (scanner != null) scanner.close();
+                    sendQrImageError(error.getMessage() == null ? "Ошибка распознавания QR." : error.getMessage());
+                }
+            });
+        }
+    }
 
+    private void sendQrImageError(String message) {
+        String js = "window.onNativeQrImageScanError(" + JSONObject.quote(message) + ");";
+        webView.post(() -> webView.evaluateJavascript(js, null));
+    }
 
     public final class AndroidOfficialDataBridge {
         @JavascriptInterface
