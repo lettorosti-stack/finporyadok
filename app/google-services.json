@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "982985551695",
+    "project_id": "family-budget-d951d",
+    "storage_bucket": "family-budget-d951d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:982985551695:android:ad2f7820d0b64bce03df3a",
+        "android_client_info": {
+          "package_name": "ru.finporyadok.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCBYy0v1SZnGbympI-NDRYjXlKPR_6oIxs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
