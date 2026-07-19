@@ -34,6 +34,7 @@ const state = {
     { name: "Стиральный порошок", qty: "1 уп.", days: 32, price: 620 }
   ]
 };
+normalizeActiveFamilyMember();
 ensureRowIds();
 initializeFamilyOwnership();
 
@@ -538,7 +539,9 @@ function topBy(rows, key, filter = () => true) {
     const item = map.get(name) || { name, total: 0, count: 0, latest: "", balance: 0 };
     item.total += Math.abs(row.amount || 0);
     item.count += 1;
-    if (!item.latest || row.date >= item.latest) {
+    const stamp = `${row.date || ""} ${row.time || ""}`;
+    if (!item.latestStamp || stamp >= item.latestStamp) {
+      item.latestStamp = stamp;
       item.latest = row.date;
       item.balance = row.balance || 0;
     }
@@ -548,8 +551,22 @@ function topBy(rows, key, filter = () => true) {
 }
 
 function accountSummaries() {
-  const map = new Map(topBy(state.rows, (row) => row.account).map((item) => [item.name, item]));
-  topBy(state.rows, (row) => row.from || row.to).forEach((item) => {
+  const member = activeFamilyMember();
+  if (member?.role === "child") {
+    const rows = currentMemberRows(state.rows);
+    const latest = rows.map((row) => row.date).sort().at(-1) || "личный профиль";
+    return [{
+      name: childPocketAccountName(member),
+      total: Math.abs(childPocketBalance(member)),
+      count: rows.length,
+      latest,
+      balance: childPocketBalance(member),
+      type: "Карманные деньги"
+    }];
+  }
+  const rows = currentMemberRows(state.rows);
+  const map = new Map(topBy(rows, (row) => row.account).map((item) => [item.name, item]));
+  topBy(rows, (row) => row.from || row.to).forEach((item) => {
     if (!item.name || item.name === "Без значения" || map.has(item.name)) return;
     map.set(item.name, item);
   });
@@ -559,7 +576,10 @@ function accountSummaries() {
     const existing = map.get(name);
     if (existing) {
       existing.type = account.type || existing.type;
-      if (!existing.balance && account.balance) existing.balance = Number(account.balance) || 0;
+      if (Number.isFinite(Number(account.balance))) {
+        existing.balance = Number(account.balance) || 0;
+        existing.latest = existing.latest || "остаток из счета";
+      }
       return;
     }
     map.set(name, {
@@ -578,7 +598,7 @@ function accountSummaries() {
 }
 
 function summary() {
-  const rows = state.rows;
+  const rows = currentMemberRows(state.rows);
   const dates = rows.map((row) => row.date).sort();
   const income = rows.filter((row) => row.amount > 0).reduce((sum, row) => sum + row.amount, 0);
   const expense = rows.filter((row) => row.amount < 0).reduce((sum, row) => sum + Math.abs(row.amount), 0);
@@ -1037,9 +1057,33 @@ function arrangeDashboardPanels() {
   if (!grid.children.length) grid.remove();
 }
 
+const sectionIconAssets = {
+  reimbursements: "./assets/ui-icons/reimbursements.svg",
+  calendar: "./assets/ui-icons/calendar-payments.svg",
+  "finance-products": "./assets/ui-icons/finance-products.svg",
+  insurance: "./assets/ui-icons/insurance.svg",
+  planning: "./assets/ui-icons/planning.svg",
+  assets: "./assets/ui-icons/assets.svg"
+};
+
+function enhanceSectionIcons() {
+  document.querySelectorAll(".sidebar .nav button[data-view]").forEach((button) => {
+    const src = sectionIconAssets[button.dataset.view];
+    if (!src) return;
+    const img = button.querySelector("img");
+    if (img) {
+      img.src = src;
+      img.removeAttribute("srcset");
+    } else {
+      button.insertAdjacentHTML("afterbegin", `<img class="nav-icon" src="${src}" alt="">`);
+    }
+  });
+}
+
 function buildMobileDrawer() {
   const target = byId("mobileDrawerGrid");
   if (!target || target.children.length) return;
+  enhanceSectionIcons();
   document.querySelectorAll(".sidebar .nav button[data-view]").forEach((source) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -1164,7 +1208,7 @@ function renderMeta() {
 function renderDashboard() {
   const selected = byId("dashboardPeriod")?.value || "month";
   const range = rowsInNamedPeriod(selected);
-  const rows = range.rows;
+  const rows = currentMemberRows(range.rows);
   const dates = rows.map((row) => row.date).sort();
   const income = rows.filter((row) => row.amount > 0 && typeOf(row) !== 'transfer').reduce((sum, row) => sum + Number(row.amount || 0), 0);
   const expense = rows.filter((row) => row.amount < 0 && typeOf(row) !== 'transfer').reduce((sum, row) => sum + Math.abs(Number(row.amount || 0)), 0);
@@ -1186,7 +1230,10 @@ function renderDashboard() {
   const latest = [...rows].sort((a, b) => `${b.date} ${b.time || ''}`.localeCompare(`${a.date} ${a.time || ''}`)).slice(0, 12);
   byId("latestRows").innerHTML = latest.length ? latest.map(rowTemplate).join("") : `<tr><td colspan="6">Нет операций за выбранный период</td></tr>`;
 
-  const accountTotals = summarizeRows(rows, (row) => row.account || row.from || "Без счёта", (row) => typeOf(row) !== 'transfer');
+  const member = activeFamilyMember();
+  const accountTotals = member?.role === "child"
+    ? [{ name: childPocketAccountName(member), count: rows.length, total: childPocketBalance(member) }]
+    : summarizeRows(rows, (row) => row.account || row.from || "Без счёта", (row) => typeOf(row) !== 'transfer');
   byId("accountSummary").innerHTML = accountTotals.slice(0, 6).length
     ? accountTotals.slice(0, 6).map((item) => accountSummaryRow(item.name, `${item.count} операций`, money(item.total))).join("")
     : `<article class="empty-state"><strong>Нет счетов</strong><p>За выбранный период движения не найдены.</p></article>`;
@@ -2601,17 +2648,57 @@ function showOperationDetails(id) {
   byId("detailDialog").showModal();
 }
 
-function setView(id) {
+const appViewHistory = [];
+
+function currentViewId() {
+  return document.querySelector(".view.active")?.id || "dashboard";
+}
+
+function closeTopDialog() {
+  const dialogs = [...document.querySelectorAll("dialog[open]")];
+  const top = dialogs.at(-1);
+  if (!top) return false;
+  top.close();
+  return true;
+}
+
+function handleAppBack() {
+  if (closeTopDialog()) return true;
+  const drawer = byId("mobileNavDrawer");
+  if (drawer?.classList.contains("open")) {
+    openMobileDrawer(false);
+    return true;
+  }
+  const previous = appViewHistory.pop();
+  if (previous && previous !== currentViewId()) {
+    setView(previous, { skipHistory: true });
+    return true;
+  }
+  if (currentViewId() !== "dashboard") {
+    setView("dashboard", { skipHistory: true });
+    return true;
+  }
+  return true;
+}
+
+window.FinPoryadokBack = handleAppBack;
+
+function setView(id, options = {}) {
   const member = activeFamilyMember();
   if (!familyCanAccessView(member, id)) {
     alert("Этот раздел недоступен текущему профилю.");
     id = "dashboard";
   }
+  const before = currentViewId();
   document.querySelectorAll(".view").forEach((view) => view.classList.toggle("active", view.id === id));
   document.querySelectorAll(".nav button").forEach((button) => button.classList.toggle("active", button.dataset.view === id));
   byId("pageTitle").textContent = views[id]?.[0] || "ФинПорядок";
   byId("pageSubtitle").textContent = views[id]?.[1] || "";
   syncMobileNavigation(id);
+  if (!options.skipHistory && before && before !== id) {
+    appViewHistory.push(before);
+    if (appViewHistory.length > 30) appViewHistory.shift();
+  }
   if (id === "transactions") renderTransactions({ reset: true });
   if (id === "reimbursements") renderWorkExpenseCenter();
   if (id === "alimony") renderAlimony();
@@ -5076,6 +5163,7 @@ cleanupImportedPdfAccounts();
 initializeDashboardDateRange();
 applyUiPreferences();
 arrangeDashboardPanels();
+enhanceSectionIcons();
 buildMobileDrawer();
 render();
 syncMobileNavigation("dashboard");
@@ -5093,9 +5181,37 @@ updateDatabaseStatus();
 function activeFamilyMember() {
   return state.familyMembers.find((member) => member.id === state.activeMemberId) || state.familyMembers[0] || null;
 }
+
+function normalizeActiveFamilyMember() {
+  if (!Array.isArray(state.familyMembers) || !state.familyMembers.length) return;
+  if (!state.familyMembers.some((member) => member.id === state.activeMemberId)) {
+    state.activeMemberId = state.familyMembers[0].id;
+  }
+}
+
+const CHILD_ALLOWED_VIEWS = new Set(["dashboard", "transactions", "shopping", "settings"]);
+
+function childPocketAccountName(member = activeFamilyMember()) {
+  return `Карманные деньги${member?.name ? ` - ${member.name}` : ""}`;
+}
+
+function currentMemberRows(rows = state.rows) {
+  const member = activeFamilyMember();
+  if (member?.role !== "child") return rows;
+  return rows.filter((row) => row.memberId === member.id || row.createdByMemberId === member.id);
+}
+
+function childPocketBalance(member = activeFamilyMember()) {
+  if (!member || member.role !== "child") return 0;
+  const operations = currentMemberRows(state.rows)
+    .filter((row) => typeOf(row) !== "transfer")
+    .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  return Number(member.allowance || 0) + operations;
+}
+
 function familyCanAccessView(member, viewId) {
   if (!member || member.role === "admin") return true;
-  return ["dashboard", "transactions", "accounts", "calendar", "shopping", "assets", "settings"].includes(viewId);
+  return CHILD_ALLOWED_VIEWS.has(viewId);
 }
 function initializeFamilyOwnership() {
   if (!Array.isArray(state.familyMembers) || !state.familyMembers.length) return;
@@ -5128,8 +5244,13 @@ function applyFamilyPermissions() {
   const member = activeFamilyMember();
   document.body.dataset.familyRole = member?.role || "admin";
   document.querySelectorAll("[data-view]").forEach((button) => { button.hidden = !familyCanAccessView(member, button.dataset.view); });
+  document.querySelectorAll("[data-view-jump]").forEach((button) => { button.hidden = !familyCanAccessView(member, button.dataset.viewJump); });
+  document.querySelectorAll("[data-mobile-view]").forEach((button) => { button.hidden = !familyCanAccessView(member, button.dataset.mobileView); });
   const addTx = byId("addTxBtn"); if (addTx) addTx.hidden = member?.role === "child" && member.canAddOperations === false;
   document.querySelectorAll("#settings .backup-hero, #settings .backup-grid, #settings .diagnostics-panel").forEach((node) => { node.hidden = member?.role === "child"; });
+  document.querySelectorAll("#dashboardAccountsPanel .panel-head button, #dashboardCategoriesPanel, #utilityAlertsPanel, #nativeNotificationPanel, #insuranceAlertsPanel, #loanAlertsPanel, #financeMaturityAlertsPanel, #utilityAlertsPanel, #workReimbursementPanel").forEach((node) => { node.hidden = member?.role === "child"; });
+  const activeView = document.querySelector(".view.active")?.id;
+  if (activeView && !familyCanAccessView(member, activeView)) setView("dashboard");
 }
 function openFamilyMemberDialog(member = null) {
   if (activeFamilyMember()?.role !== "admin") return;
@@ -5345,7 +5466,10 @@ async function syncCloudNow(reason="manual"){
   finally{cloudSyncBusy=false;renderCloudSyncStatus();}
 }
 function scheduleCloudSyncAfterSave(){
-  if(suppressCloudAutoSync)return;const meta=cloudMeta();if(!meta.connected||meta.autoSync===false)return;clearTimeout(cloudSyncTimer);cloudSyncTimer=setTimeout(()=>syncCloudNow("autosave"),1800);
+  if(suppressCloudAutoSync)return;
+  const meta=cloudMeta();
+  if(meta.connected&&meta.autoSync!==false){clearTimeout(cloudSyncTimer);cloudSyncTimer=setTimeout(()=>syncCloudNow("autosave"),1800);}
+  scheduleFirebaseSyncAfterSave();
 }
 function setCloudMessage(text,stateName=""){const el=byId("cloudSyncMessage");if(el)el.textContent=text;const badge=byId("cloudSyncBadge");if(badge&&stateName)badge.dataset.state=stateName;}
 function renderCloudSyncStatus(forceState=""){
@@ -5363,6 +5487,106 @@ byId("cloudAutoSync")?.addEventListener("change",e=>{const meta=cloudMeta();meta
 byId("cloudHistoryBtn")?.addEventListener("click",()=>{renderCloudHistory();byId("cloudHistoryDialog")?.showModal();});
 renderCloudSyncStatus();renderCloudHistory();
 if(nativeCloudAvailable())setTimeout(()=>window.AndroidCloudSync.getCloudStatus(),300);
+
+const FIREBASE_META_KEY = `${storeKey}.firebase.meta`;
+const FIREBASE_SYNC_PATH = "families/default/state";
+let firebaseSyncBusy = false;
+let firebaseSyncTimer = null;
+let firebaseReadResolver = null;
+let firebaseWriteResolver = null;
+
+function firebaseMeta(){try{return JSON.parse(localStorage.getItem(FIREBASE_META_KEY)||"{}");}catch{return {};}}
+function saveFirebaseMeta(meta){localStorage.setItem(FIREBASE_META_KEY,JSON.stringify(meta||{}));renderFirebaseSyncStatus();}
+function nativeFirebaseAvailable(){return Boolean(window.AndroidFirebaseSync&&typeof window.AndroidFirebaseSync.readState==="function"&&typeof window.AndroidFirebaseSync.writeState==="function");}
+function nativeFirebaseConfigured(){
+  if(!nativeFirebaseAvailable()||typeof window.AndroidFirebaseSync.isConfigured!=="function")return false;
+  try{return Boolean(window.AndroidFirebaseSync.isConfigured());}catch{return false;}
+}
+function requestFirebaseRead(){
+  return new Promise((resolve,reject)=>{
+    if(!nativeFirebaseAvailable())return reject(new Error("Firebase доступен только в установленном Android-приложении."));
+    if(!nativeFirebaseConfigured())return reject(new Error("Firebase не настроен в APK. Добавьте app/google-services.json и пересоберите приложение."));
+    firebaseReadResolver={resolve,reject};
+    window.AndroidFirebaseSync.readState(FIREBASE_SYNC_PATH);
+    setTimeout(()=>{if(firebaseReadResolver){firebaseReadResolver=null;reject(new Error("Firebase не ответил вовремя."));}},15000);
+  });
+}
+function requestFirebaseWrite(text){
+  return new Promise((resolve,reject)=>{
+    if(!nativeFirebaseAvailable())return reject(new Error("Firebase доступен только в установленном Android-приложении."));
+    if(!nativeFirebaseConfigured())return reject(new Error("Firebase не настроен в APK. Добавьте app/google-services.json и пересоберите приложение."));
+    firebaseWriteResolver={resolve,reject};
+    window.AndroidFirebaseSync.writeState(FIREBASE_SYNC_PATH,text);
+    setTimeout(()=>{if(firebaseWriteResolver){firebaseWriteResolver=null;reject(new Error("Не удалось подтвердить запись в Firebase."));}},15000);
+  });
+}
+window.onNativeFirebaseStatus=(configured)=>{const meta=firebaseMeta();meta.configured=Boolean(configured);saveFirebaseMeta(meta);};
+window.onNativeFirebaseRead=(content)=>{if(firebaseReadResolver){const r=firebaseReadResolver;firebaseReadResolver=null;r.resolve(content||"");}};
+window.onNativeFirebaseWritten=()=>{if(firebaseWriteResolver){const r=firebaseWriteResolver;firebaseWriteResolver=null;r.resolve(true);}};
+window.onNativeFirebaseError=(message)=>{
+  if(firebaseReadResolver){const r=firebaseReadResolver;firebaseReadResolver=null;r.reject(new Error(message||"Ошибка Firebase"));return;}
+  if(firebaseWriteResolver){const r=firebaseWriteResolver;firebaseWriteResolver=null;r.reject(new Error(message||"Ошибка Firebase"));return;}
+  setFirebaseMessage(message||"Ошибка Firebase","error");
+};
+function setFirebaseMessage(text,stateName=""){const el=byId("firebaseSyncMessage");if(el)el.textContent=text;const badge=byId("firebaseSyncBadge");if(badge&&stateName)badge.dataset.state=stateName;}
+function renderFirebaseSyncStatus(forceState=""){
+  const meta=firebaseMeta(),configured=nativeFirebaseConfigured()||meta.configured;
+  const badge=byId("firebaseSyncBadge");if(!badge)return;
+  badge.textContent=firebaseSyncBusy||forceState==="busy"?"Синхронизация…":configured?"Настроено":"Не настроено";
+  badge.dataset.state=firebaseSyncBusy||forceState==="busy"?"busy":configured?"ok":"";
+  byId("firebaseSyncPath").textContent=`finporyadok/${FIREBASE_SYNC_PATH}`;
+  byId("firebaseAutoSync").checked=Boolean(meta.autoSync);
+  byId("firebaseSyncLastAt").textContent=meta.lastSyncAt?`Последняя синхронизация: ${new Date(meta.lastSyncAt).toLocaleString("ru-RU")}`:"Синхронизация ещё не выполнялась";
+  byId("firebaseSyncStateText").textContent=configured?(
+    meta.lastDirection==="download"?"Последние изменения получены из Firebase":
+    meta.lastDirection==="upload"?"Последние изменения отправлены в Firebase":
+    meta.lastDirection==="merge"?`Базы объединены${meta.conflictCount?`, совпадений: ${meta.conflictCount}`:""}`:
+    "Firebase готов к синхронизации"
+  ):"Добавьте google-services.json и пересоберите APK.";
+  const disabled=!configured||firebaseSyncBusy;
+  byId("firebasePushBtn").disabled=disabled;byId("firebasePullBtn").disabled=disabled;
+}
+async function pushFirebaseNow(reason="manual"){
+  if(firebaseSyncBusy)return;
+  firebaseSyncBusy=true;renderFirebaseSyncStatus("busy");setFirebaseMessage("Отправляем базу в Firebase…");
+  try{
+    const envelope=makeCloudEnvelope();
+    await requestFirebaseWrite(JSON.stringify(envelope));
+    saveFirebaseMeta({...firebaseMeta(),configured:true,lastSyncAt:new Date().toISOString(),lastHash:envelope.hash,lastDirection:"upload"});
+    addCloudHistory("База отправлена в Firebase",reason);
+    setFirebaseMessage("База отправлена в Firebase.","ok");
+  }catch(error){addCloudHistory("Ошибка Firebase",error.message,"error");setFirebaseMessage(error.message||"Не удалось отправить данные в Firebase.","error");}
+  finally{firebaseSyncBusy=false;renderFirebaseSyncStatus();}
+}
+async function pullFirebaseNow(reason="manual"){
+  if(firebaseSyncBusy)return;
+  firebaseSyncBusy=true;renderFirebaseSyncStatus("busy");setFirebaseMessage("Получаем базу из Firebase…");
+  try{
+    const remoteText=await requestFirebaseRead();
+    if(!remoteText.trim()){setFirebaseMessage("В Firebase ещё нет базы. Сначала отправьте текущие данные.","error");return;}
+    let remote;try{remote=JSON.parse(remoteText);}catch{throw new Error("В Firebase хранится повреждённый или несовместимый формат.");}
+    if(remote.format!=="finporyadok-cloud-sync"||!remote.payload)throw new Error("В Firebase найден несовместимый файл синхронизации.");
+    const localEnvelope=makeCloudEnvelope(),remoteHash=remote.hash||simpleHash(remote.payload),localHash=localEnvelope.hash;
+    if(remoteHash===localHash){saveFirebaseMeta({...firebaseMeta(),configured:true,lastSyncAt:new Date().toISOString(),lastHash:localHash,lastDirection:"equal"});setFirebaseMessage("Локальная база уже совпадает с Firebase.","ok");return;}
+    const merged=mergeCloudPayload(localEnvelope.payload,remote.payload,remote.updatedAt);
+    const mergedEnvelope={...makeCloudEnvelope(),payload:merged.payload};mergedEnvelope.hash=simpleHash(merged.payload);mergedEnvelope.updatedAt=new Date().toISOString();
+    await requestFirebaseWrite(JSON.stringify(mergedEnvelope));
+    saveFirebaseMeta({...firebaseMeta(),configured:true,lastSyncAt:new Date().toISOString(),lastHash:mergedEnvelope.hash,lastDirection:"merge",conflictCount:merged.conflicts.length});
+    addCloudHistory("База объединена с Firebase",merged.conflicts.length?`Совпадающие записи: ${merged.conflicts.length}`:reason,merged.conflicts.length?"conflict":"info");
+    if(mergedEnvelope.hash!==localHash){setFirebaseMessage("Данные из Firebase объединены. Приложение перезапускается…","ok");applyCloudPayload(merged.payload);return;}
+    setFirebaseMessage("Данные Firebase объединены с локальной базой.","ok");
+  }catch(error){addCloudHistory("Ошибка Firebase",error.message,"error");setFirebaseMessage(error.message||"Не удалось получить данные из Firebase.","error");}
+  finally{firebaseSyncBusy=false;renderFirebaseSyncStatus();}
+}
+function scheduleFirebaseSyncAfterSave(){
+  const meta=firebaseMeta();if(!meta.autoSync||!nativeFirebaseConfigured())return;
+  clearTimeout(firebaseSyncTimer);firebaseSyncTimer=setTimeout(()=>pushFirebaseNow("autosave"),2400);
+}
+byId("firebasePushBtn")?.addEventListener("click",()=>pushFirebaseNow("manual"));
+byId("firebasePullBtn")?.addEventListener("click",()=>pullFirebaseNow("manual"));
+byId("firebaseAutoSync")?.addEventListener("change",e=>{const meta=firebaseMeta();meta.autoSync=e.target.checked;saveFirebaseMeta(meta);addCloudHistory(e.target.checked?"Автоотправка Firebase включена":"Автоотправка Firebase выключена");if(e.target.checked)pushFirebaseNow("auto-enabled");});
+renderFirebaseSyncStatus();
+if(nativeFirebaseAvailable())setTimeout(()=>window.AndroidFirebaseSync.getStatus(),350);
 
 
 // PACKAGE 7/9 — budgets, goals, family privacy and cash forecast
