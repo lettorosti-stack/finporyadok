@@ -6,12 +6,40 @@ android {
     namespace "ru.finporyadok.app"
     compileSdk 35
 
+    def ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")
+    def appVersionCode = ciRunNumber ? 1000 + ciRunNumber.toInteger() : 59
+    def releaseKeyFile = file("finporyadok-update-key.jks")
+    def releaseKeyBase64File = file("finporyadok-update-key.jks.base64")
+    if (!releaseKeyFile.exists() && releaseKeyBase64File.exists()) {
+        releaseKeyFile.bytes = releaseKeyBase64File.text.replaceAll("\\s", "").decodeBase64()
+    }
+
     defaultConfig {
         applicationId "ru.finporyadok.app"
         minSdk 23
         targetSdk 35
-        versionCode 58
-        versionName "0.20.3"
+        versionCode appVersionCode
+        versionName "0.20.4"
+    }
+
+    signingConfigs {
+        release {
+            storeFile releaseKeyFile
+            storePassword "finporyadok2026"
+            keyAlias "finporyadok"
+            keyPassword "finporyadok2026"
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.release
+        }
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
+            shrinkResources false
+        }
     }
 }
 
