@@ -40,6 +40,12 @@ import androidx.core.content.FileProvider;
 import androidx.documentfile.provider.DocumentFile;
 
 import com.google.android.gms.tasks.Task;
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ValueEventListener;
 import com.google.mlkit.vision.barcode.common.Barcode;
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanner;
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions;
@@ -55,6 +61,7 @@ public class MainActivity extends Activity {
     private static final int NOTIFICATION_PERMISSION_REQUEST = 1004;
     private static final String CLOUD_PREFS = "finporyadok_cloud";
     private static final String CLOUD_URI_KEY = "tree_uri";
+    private static final String FIREBASE_DATABASE_URL = "https://family-budget-d951d-default-rtdb.firebaseio.com/";
     private WebView webView;
     private ValueCallback<Uri[]> filePathCallback;
     private String pendingFileContent;
@@ -90,6 +97,7 @@ public class MainActivity extends Activity {
         webView.addJavascriptInterface(new AndroidOfficialDataBridge(), "AndroidOfficialDataBridge");
         webView.addJavascriptInterface(new AndroidReceiptOcrBridge(), "AndroidReceiptOcr");
         webView.addJavascriptInterface(new AndroidCloudSyncBridge(), "AndroidCloudSync");
+        webView.addJavascriptInterface(new AndroidFirebaseSyncBridge(), "AndroidFirebaseSync");
         webView.addJavascriptInterface(new AndroidNotificationBridge(), "AndroidNotifications");
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -470,6 +478,108 @@ public class MainActivity extends Activity {
         }
     }
 
+    public final class AndroidFirebaseSyncBridge {
+        @JavascriptInterface
+        public boolean isConfigured() {
+            return ensureFirebaseReady(false);
+        }
+
+        @JavascriptInterface
+        public void getStatus() {
+            boolean configured = ensureFirebaseReady(false);
+            String js = "window.onNativeFirebaseStatus(" + configured + ");";
+            webView.post(() -> webView.evaluateJavascript(js, null));
+        }
+
+        @JavascriptInterface
+        public void readState(String syncPath) {
+            if (!ensureFirebaseReady(true)) return;
+            try {
+                firebaseReference(syncPath).addListenerForSingleValueEvent(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(DataSnapshot snapshot) {
+                        String content = "";
+                        Object raw = snapshot.getValue();
+                        if (raw instanceof String) {
+                            content = (String) raw;
+                        } else if (raw != null) {
+                            content = raw.toString();
+                        }
+                        String js = "window.onNativeFirebaseRead(" + JSONObject.quote(content) + ");";
+                        webView.post(() -> webView.evaluateJavascript(js, null));
+                    }
+
+                    @Override
+                    public void onCancelled(DatabaseError error) {
+                        sendFirebaseError(error == null ? "Ошибка чтения Firebase" : error.getMessage());
+                    }
+                });
+            } catch (Exception error) {
+                sendFirebaseError(error.getMessage());
+            }
+        }
+
+        @JavascriptInterface
+        public void writeState(String syncPath, String content) {
+            if (!ensureFirebaseReady(true)) return;
+            try {
+                firebaseReference(syncPath).setValue(content == null ? "" : content)
+                        .addOnSuccessListener(unused -> {
+                            String js = "window.onNativeFirebaseWritten();";
+                            webView.post(() -> webView.evaluateJavascript(js, null));
+                        })
+                        .addOnFailureListener(error -> sendFirebaseError(error.getMessage()));
+            } catch (Exception error) {
+                sendFirebaseError(error.getMessage());
+            }
+        }
+    }
+
+    private boolean ensureFirebaseReady(boolean notifyWeb) {
+        try {
+            FirebaseApp app = FirebaseApp.initializeApp(this);
+            if (app == null) {
+                app = FirebaseApp.getInstance();
+            }
+            return app != null;
+        } catch (Exception error) {
+            if (notifyWeb) {
+                String message = error.getMessage();
+                sendFirebaseError(message == null || message.trim().isEmpty()
+                        ? "Firebase не настроен. Добавьте app/google-services.json и пересоберите APK."
+                        : message);
+            }
+            return false;
+        }
+    }
+
+    private DatabaseReference firebaseReference(String syncPath) {
+        String rawPath = syncPath == null || syncPath.trim().isEmpty()
+                ? "families/default/state"
+                : syncPath.trim();
+        DatabaseReference reference = FirebaseDatabase.getInstance(FIREBASE_DATABASE_URL).getReference("finporyadok");
+        for (String part : rawPath.split("/")) {
+            String safe = safeFirebaseSegment(part);
+            if (!safe.isEmpty()) {
+                reference = reference.child(safe);
+            }
+        }
+        return reference;
+    }
+
+    private String safeFirebaseSegment(String value) {
+        if (value == null) return "";
+        return value.trim().replaceAll("[.#$\\[\\]/]", "_");
+    }
+
+    private void sendFirebaseError(String message) {
+        String safeMessage = message == null || message.trim().isEmpty()
+                ? "Ошибка Firebase"
+                : message;
+        String js = "window.onNativeFirebaseError(" + JSONObject.quote(safeMessage) + ");";
+        webView.post(() -> webView.evaluateJavascript(js, null));
+    }
+
     private DocumentFile getCloudFolder() {
         String raw = getSharedPreferences(CLOUD_PREFS, MODE_PRIVATE).getString(CLOUD_URI_KEY, "");
         if (raw == null || raw.isEmpty()) throw new IllegalStateException("Облачная папка не подключена");
@@ -627,10 +737,16 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
+        if (webView == null) {
             return;
         }
-        super.onBackPressed();
+        webView.evaluateJavascript(
+                "(function(){try{return !!(window.FinPoryadokBack && window.FinPoryadokBack());}catch(e){return false;}})();",
+                handled -> {
+                    if (!"true".equals(handled) && webView != null && webView.canGoBack()) {
+                        webView.goBack();
+                    }
+                }
+        );
     }
 }
