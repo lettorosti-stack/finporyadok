@@ -523,6 +523,18 @@
 </div>
 </section>
 <section class="view" id="shopping">
+<section class="panel shopping-receipt-actions">
+  <div class="panel-head"><div><h2>Добавить чек</h2><p>Сканируйте QR камерой или распознайте фотографию целого чека до товарных позиций.</p></div></div>
+  <div class="receipt-action-grid">
+    <button class="primary receipt-action-button" id="shoppingScanQrBtn" type="button"><span class="receipt-action-icon">⌁</span><strong>Сканировать QR</strong><small>Открыть камеру и навести на код</small></button>
+    <button class="receipt-action-button" id="shoppingPhotoReceiptBtn" type="button"><span class="receipt-action-icon">▤</span><strong>Сфотографировать чек</strong><small>Распознать магазин, итог и товары</small></button>
+    <button class="receipt-action-button" id="shoppingChooseReceiptBtn" type="button"><span class="receipt-action-icon">▧</span><strong>Выбрать фото</strong><small>JPG или PNG из галереи</small></button>
+  </div>
+  <input id="shoppingReceiptPhotoInput" type="file" accept="image/*" capture="environment" hidden>
+  <input id="shoppingReceiptGalleryInput" type="file" accept="image/*" hidden>
+  <p class="import-result shopping-receipt-status" id="shoppingReceiptStatus">Чек ещё не выбран.</p>
+  <details class="receipt-manual-details"><summary>Дополнительный способ</summary><button id="shoppingPasteQrBtn" type="button">Ввести строку QR вручную</button></details>
+</section>
 <div class="dashboard-grid shopping-grid">
 <section class="panel">
 <div class="panel-head">
@@ -942,8 +954,8 @@
 </section>
 <section class="receipt-items-section">
 <div class="panel-head">
-<div><h3>Позиции чека</h3><p>Добавьте товары вручную, если сервис ФНС не вернул состав</p></div>
-<button id="addReceiptItem" type="button">+ Позиция</button>
+<div><h3>Позиции чека</h3><p>Распознайте фото чека до отдельных товаров, количества и стоимости</p></div>
+<div class="receipt-items-actions"><button class="ghost" id="recognizeReceiptItemsBtn" type="button">📷 Распознать товары</button><button id="addReceiptItem" type="button">+ Позиция</button></div>
 </div>
 <div class="receipt-items" id="receiptItems"></div>
 </section>
@@ -1053,8 +1065,8 @@
   <form id="qrPasteForm">
     <header>
       <div>
-        <h2>Вставить QR кассового чека</h2>
-        <p>Вставьте строку вида t=...&amp;s=...&amp;fn=...&amp;i=...&amp;fp=...</p>
+        <h2>Ручной ввод QR</h2>
+        <p>Запасной способ для уже скопированной строки QR. Основной способ — сканирование камерой.</p>
       </div>
       <button data-close="" type="button">×</button>
     </header>
@@ -1306,7 +1318,7 @@
 <menu><button data-close="" type="button">Отмена</button><button class="primary">Сохранить</button></menu>
 </form>
 </dialog>
-<dialog class="finance-product-dialog" id="productDetailsDialog"><header><div><h2 id="productDetailsTitle">Товар</h2><p>История покупок и цен</p></div><button data-close type="button">×</button></header><div id="productDetailsBody"></div></dialog><dialog class="finance-product-dialog" id="paperReceiptDialog"><header><div><h2>Распознавание бумажного чека</h2><p id="paperReceiptStatus">Выберите хорошо освещённое фото чека.</p></div><button data-close type="button">×</button></header></dialog><dialog id="shoppingDialog">
+<dialog class="finance-product-dialog" id="productDetailsDialog"><header><div><h2 id="productDetailsTitle">Товар</h2><p>История покупок и цен</p></div><button data-close type="button">×</button></header><div id="productDetailsBody"></div></dialog><dialog class="finance-product-dialog paper-receipt-dialog" id="paperReceiptDialog"><header><div><h2>Распознавание бумажного чека</h2><p id="paperReceiptStatus">Выберите хорошо освещённое фото, на котором полностью видны товары и итог.</p></div><button data-close type="button">×</button></header><div class="paper-receipt-guide"><strong>Для лучшего результата</strong><span>Разложите чек ровно, уберите тени и снимите его целиком сверху.</span></div><div class="paper-receipt-progress" id="paperReceiptProgress" hidden><span class="paper-receipt-spinner"></span><div><strong>Распознаём чек</strong><small>Определяем магазин, дату, итог и товарные позиции…</small></div></div><menu><button data-close type="button">Отмена</button><button class="primary" id="choosePaperReceiptPhotoBtn" type="button">Выбрать фото</button></menu></dialog><dialog id="shoppingDialog">
 <form id="shoppingForm" method="dialog">
 <header>
 <h2>Покупка</h2>
