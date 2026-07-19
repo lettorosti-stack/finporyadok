@@ -36,11 +36,19 @@ $excludeDirs = @(
     "app/build",
     "app/src/main/assets/www",
     "Новая папка",
-    "finporyadok_codex_package"
+    "finporyadok_codex_package",
+    "_user_final_baseline_zip",
+    "_backup_wrong_version_20260719-restore-before-baseline",
+    "tmp-apk-inspect-1784439623393"
 )
 
 $excludeFiles = @(
-    "finporyadok-github-upload.zip"
+    "finporyadok-github-upload.zip",
+    "_restored_mobile_preview.png",
+    "_restored_mobile_preview_fixed.png",
+    "_polished_mobile_preview.png",
+    "_final_mobile_preview.png",
+    "_final_mobile_quick_access.png"
 )
 
 function Convert-ToRepoPath([string]$fullPath) {
