@@ -4929,6 +4929,7 @@ function processReceiptQrText(raw) {
 window.onNativeQrScanned = function(rawValue) {
   try {
     processReceiptQrText(String(rawValue || ""));
+    setReceiptScanStatus("QR чека распознан. Проверьте данные и сохраните расход.");
   } catch (error) {
     const message = `Чек не распознан: ${error.message || error}`;
     if (byId("qrPasteStatus")) byId("qrPasteStatus").textContent = message;
@@ -4979,21 +4980,65 @@ async function readQrFromSelectedFile(file) {
   return parseQrFile(file);
 }
 
+
+let pendingNativeQrImageContext = null;
+
+async function fileToBase64Payload(file) {
+  if (!file) return "";
+  if (file.size > 16 * 1024 * 1024) throw new Error("Файл больше 16 МБ. Уменьшите размер изображения.");
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || "").split(",").pop() || "");
+    reader.onerror = () => reject(reader.error || new Error("Не удалось прочитать файл."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function setReceiptScanStatus(text) {
+  if (byId("importResult")) byId("importResult").textContent = text;
+  if (byId("shoppingReceiptStatus")) byId("shoppingReceiptStatus").textContent = text;
+}
+
+window.onNativeQrImageScanned = function(rawValue) {
+  pendingNativeQrImageContext = null;
+  try {
+    processReceiptQrText(String(rawValue || ""));
+    setReceiptScanStatus("QR чека распознан. Проверьте данные и сохраните расход.");
+  } catch (error) {
+    setReceiptScanStatus(`Чек не распознан: ${error.message || error}`);
+  }
+};
+
+window.onNativeQrImageScanError = function(message) {
+  pendingNativeQrImageContext = null;
+  setReceiptScanStatus(message || "QR-код на изображении не найден. Попробуйте снять QR крупнее и без бликов.");
+};
+
+async function scanQrFromImageNatively(file) {
+  if (!window.AndroidQrImageScanner?.recognizeBase64) {
+    throw new Error("Сканирование QR с фотографии доступно в Android-приложении после обновления APK.");
+  }
+  const payload = await fileToBase64Payload(file);
+  pendingNativeQrImageContext = { name: file.name || "receipt-image" };
+  window.AndroidQrImageScanner.recognizeBase64(payload);
+}
+
 async function handleReceiptImage(file) {
   if (!file) return;
-  byId("importResult").textContent = `Сканирую кассовый QR из ${file.name}...`;
+  setReceiptScanStatus(`Сканирую QR на изображении ${file.name}…`);
   try {
-    const raw = await readQrFromSelectedFile(file);
-    if (!raw) throw new Error("QR-код не найден.");
-    const qrLine = raw.split(/\r?\n/).find((line) => /(?:^|[?&])(?:fn|s|t)=/i.test(line)) || raw;
-    processReceiptQrText(qrLine);
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (isPdf) {
+      const raw = await readQrFromSelectedFile(file);
+      if (!raw) throw new Error("QR-код в PDF не найден.");
+      const qrLine = raw.split(/\r?\n/).find((line) => /(?:^|[?&])(?:fn|s|t)=/i.test(line)) || raw;
+      processReceiptQrText(qrLine);
+      setReceiptScanStatus("QR чека из PDF распознан.");
+      return;
+    }
+    await scanQrFromImageNatively(file);
   } catch (error) {
-    openQrPasteDialog("Автоматически прочитать фото не удалось. Скопируйте строку QR через Google Lens и вставьте ниже.");
-    pendingQrImageUrl = URL.createObjectURL(file);
-    byId("qrPhotoPreview").src = pendingQrImageUrl;
-    byId("qrPhotoFallback").hidden = false;
-    byId("qrPasteStatus").textContent = `Фото выбрано: ${file.name}. ${error.message || error}`;
-    byId("importResult").textContent = "Фото открыто в резервном режиме ручной вставки QR.";
+    setReceiptScanStatus(error.message || String(error));
   }
 }
 
@@ -5137,11 +5182,222 @@ byId('shoppingList')?.addEventListener('click',e=>{const b=e.target.closest('.sh
 byId('shoppingCatalog')?.addEventListener('click',e=>{const c=e.target.closest('[data-product-key]');if(c)openProductDetails(c.dataset.productKey);});
 byId('purchasePredictions')?.addEventListener('click',e=>{const c=e.target.closest('[data-product-key]');if(c)openProductDetails(c.dataset.productKey);});
 byId('productDetailsBody')?.addEventListener('click',e=>{const b=e.target.closest('.add-product-to-list');if(!b)return;const p=productCatalog().find(x=>x.key===b.dataset.productKey);if(!p)return;state.shopping.unshift({id:`shopping-plan-${Date.now()}`,recordType:'planned',name:p.name,canonicalName:p.name,qty:p.last.qty||'1 шт.',store:p.storeStats[0]?.store||p.last.store||'',price:Number(p.last.price)||0,date:p.nextDate,checked:false});saveState();byId('productDetailsDialog').close();renderShopping();});
-function parseReceiptTextLines(text){const lines=String(text||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const out=[];for(let i=0;i<lines.length;i++){const line=lines[i].replace(/\s+/g,' ');const m=line.match(/^(.{2,}?)\s+(\d+[.,]\d{2})\s*(?:₽|руб)?$/i);if(m&&!/итого|сумма|налог|скидка|всего/i.test(m[1]))out.push({name:m[1].trim(),price:Number(m[2].replace(',','.'))});}return out.slice(0,80);}
-window.onNativeReceiptTextRecognized=function(text){const items=parseReceiptTextLines(text);const merchant=parseReceiptMerchant(text);if(merchant&&!byId('receiptMerchant').value.trim())byId('receiptMerchant').value=merchant;if(!items.length){byId('paperReceiptStatus').textContent='Текст распознан, но позиции не найдены. Проверьте фото или добавьте позиции вручную.';return;}byId('receiptItems').innerHTML='';items.forEach(i=>addReceiptItemRow(i.name,i.price));byId('paperReceiptDialog')?.close();byId('receiptStatus').textContent=`Распознано позиций: ${items.length}. ${merchant?'Продавец: '+merchant+'. ':''}Проверьте названия, количество и цену.`;byId('receiptDialog').showModal();};
-window.onNativeReceiptTextError=function(message){byId('paperReceiptStatus').textContent=message||'Не удалось распознать чек.';};
-byId('scanPaperReceiptBtn')?.addEventListener('click',()=>byId('paperReceiptInput')?.click());
-byId('paperReceiptInput')?.addEventListener('change',async e=>{const file=e.target.files?.[0];if(!file)return;byId('paperReceiptStatus').textContent='Распознаю позиции чека…';try{const data=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',').pop());r.onerror=rej;r.readAsDataURL(file);});if(window.AndroidReceiptOcr?.recognizeBase64){window.AndroidReceiptOcr.recognizeBase64(data);}else throw new Error('Распознавание доступно в Android-приложении.');}catch(err){byId('paperReceiptStatus').textContent=err.message||String(err);}});
+function receiptNumber(value) {
+  const normalized = String(value || '').replace(/\s/g, '').replace(',', '.').replace(/[^0-9.\-]/g, '');
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function receiptUnit(value) {
+  const text = String(value || '').toLowerCase();
+  if (/\bкг\b/.test(text)) return 'кг';
+  if (/\bмл\b/.test(text)) return 'мл';
+  if (/\bл\b/.test(text)) return 'л';
+  if (/\bгр?\.?\b|\bг\b/.test(text)) return 'г';
+  if (/упак|\bуп\.?\b/.test(text)) return 'уп.';
+  return 'шт.';
+}
+
+function cleanReceiptItemName(value) {
+  return String(value || '')
+    .replace(/^\s*\d+[.)]\s*/, '')
+    .replace(/\s+(?:x|х|×)\s*\d+[.,]?\d*\s*(?:шт|кг|г|л|мл|уп)?\.?$/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/[|_*]+$/g, '')
+    .trim();
+}
+
+function isReceiptServiceLine(value) {
+  return /^(?:итог|итого|всего|сумма|наличными|безналичными|карта|сдача|скидка|ндс|налог|кассир|чек|фн|фд|фп|инн|ккт|смена|приход|оплата|адрес|сайт|спасибо|телефон|эквайринг|банковская карта)/i.test(String(value || '').trim());
+}
+
+function parseReceiptDateTime(text) {
+  const source = String(text || '');
+  const dateMatch = source.match(/\b(\d{2})[.\/-](\d{2})[.\/-](\d{2,4})\b/);
+  const timeMatch = source.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+  let date = '';
+  if (dateMatch) {
+    let year = dateMatch[3];
+    if (year.length === 2) year = `20${year}`;
+    date = `${year}-${dateMatch[2]}-${dateMatch[1]}`;
+  }
+  return { date, time: timeMatch ? `${timeMatch[1].padStart(2, '0')}:${timeMatch[2]}` : '' };
+}
+
+function parseReceiptTotal(text) {
+  const lines = String(text || '').split(/\r?\n/).map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const candidates = [];
+  lines.forEach((line, index) => {
+    const amountMatches = [...line.matchAll(/(\d{1,7}[.,]\d{2})\s*(?:₽|руб(?:\.|ля|лей)?)?/gi)];
+    amountMatches.forEach((match) => {
+      const value = receiptNumber(match[1]);
+      if (!value) return;
+      const weight = /итог|итого|всего|к оплате|сумма чека/i.test(line) ? 1000 : index;
+      candidates.push({ value, weight });
+    });
+  });
+  candidates.sort((a, b) => b.weight - a.weight || b.value - a.value);
+  return candidates[0]?.value || 0;
+}
+
+function parseReceiptTextDetailed(text) {
+  const lines = String(text || '').split(/\r?\n/).map((line) => line.replace(/[\t\u00a0]+/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const items = [];
+  const priceAtEnd = /(\d{1,7}[.,]\d{2})\s*(?:₽|руб(?:\.|ля|лей)?)?\s*$/i;
+  const qtyPattern = /(?:^|\s)(\d+[.,]?\d*)\s*(?:x|х|×)\s*(\d+[.,]\d{2})(?:\s|$)/i;
+  const standaloneQty = /(?:^|\s)(\d+[.,]?\d*)\s*(шт\.?|кг|г|гр\.?|л|мл|уп\.?|упак\.)\b/i;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    let line = lines[i];
+    if (isReceiptServiceLine(line)) continue;
+    const priceMatch = line.match(priceAtEnd);
+    let name = '';
+    let total = 0;
+    let qty = 1;
+    let unit = 'шт.';
+
+    if (priceMatch) {
+      total = receiptNumber(priceMatch[1]);
+      name = cleanReceiptItemName(line.slice(0, priceMatch.index));
+    } else if (i + 1 < lines.length && !isReceiptServiceLine(line)) {
+      const nextPrice = lines[i + 1].match(/^\s*(\d{1,7}[.,]\d{2})\s*(?:₽|руб(?:\.|ля|лей)?)?\s*$/i);
+      if (nextPrice) {
+        total = receiptNumber(nextPrice[1]);
+        name = cleanReceiptItemName(line);
+        i += 1;
+      }
+    }
+
+    if (!name || !total || name.length < 2 || /^\d+$/.test(name)) continue;
+    const qtyMatch = line.match(qtyPattern);
+    if (qtyMatch) qty = Math.max(0.001, receiptNumber(qtyMatch[1]));
+    const simpleQty = line.match(standaloneQty);
+    if (simpleQty) {
+      qty = Math.max(0.001, receiptNumber(simpleQty[1]));
+      unit = receiptUnit(simpleQty[2]);
+    } else {
+      unit = receiptUnit(line);
+    }
+    if (/скидка|бонус|итог|всего|сумма/i.test(name)) continue;
+    items.push({ name, price: total, qty, unit });
+  }
+
+  const deduped = [];
+  items.forEach((item) => {
+    const previous = deduped[deduped.length - 1];
+    if (previous && previous.name === item.name && previous.price === item.price) return;
+    deduped.push(item);
+  });
+  const dateTime = parseReceiptDateTime(text);
+  return {
+    merchant: parseReceiptMerchant(text),
+    amount: parseReceiptTotal(text) || deduped.reduce((sum, item) => sum + Number(item.price || 0), 0),
+    date: dateTime.date,
+    time: dateTime.time,
+    items: deduped.slice(0, 120),
+    rawText: String(text || '')
+  };
+}
+
+function parseReceiptTextLines(text) {
+  return parseReceiptTextDetailed(text).items;
+}
+
+window.onNativeReceiptTextRecognized = function(text) {
+  const parsed = parseReceiptTextDetailed(text);
+  const status = byId('paperReceiptStatus');
+  const progress = byId('paperReceiptProgress');
+  if (progress) progress.hidden = true;
+  if (!parsed.items.length) {
+    if (status) status.textContent = 'Текст распознан, но товарные позиции не найдены. Снимите чек целиком без теней или добавьте товары вручную.';
+    return;
+  }
+  receiptSelectOptions();
+  if (parsed.merchant) byId('receiptMerchant').value = parsed.merchant;
+  if (parsed.amount > 0) byId('receiptAmount').value = parsed.amount.toFixed(2);
+  if (parsed.date) byId('receiptDate').value = parsed.date;
+  if (parsed.time) byId('receiptTime').value = parsed.time;
+  byId('receiptItems').innerHTML = '';
+  parsed.items.forEach((item) => addReceiptItemRow(item.name, item.price, item.qty, item.unit));
+  updateReceiptPreview();
+  byId('paperReceiptDialog')?.close();
+  byId('receiptStatus').textContent = `Распознано товаров: ${parsed.items.length}. Итог: ${money(parsed.amount)}.${parsed.merchant ? ` Магазин: ${parsed.merchant}.` : ''} Проверьте позиции перед сохранением.`;
+  if (!byId('receiptDialog')?.open) byId('receiptDialog')?.showModal();
+  setReceiptScanStatus(`Распознано товаров: ${parsed.items.length}. Проверьте данные перед сохранением.`);
+};
+
+window.onNativeReceiptTextError = function(message) {
+  const progress = byId('paperReceiptProgress');
+  if (progress) progress.hidden = true;
+  byId('paperReceiptStatus').textContent = message || 'Не удалось распознать чек.';
+  setReceiptScanStatus(message || 'Не удалось распознать чек.');
+};
+
+function openPaperReceiptRecognition() {
+  const dialog = byId('paperReceiptDialog');
+  if (byId('paperReceiptStatus')) byId('paperReceiptStatus').textContent = 'Выберите хорошо освещённое фото, на котором полностью видны товары и итог.';
+  if (byId('paperReceiptProgress')) byId('paperReceiptProgress').hidden = true;
+  if (dialog && !dialog.open) dialog.showModal();
+}
+
+byId('scanPaperReceiptBtn')?.addEventListener('click', openPaperReceiptRecognition);
+byId('recognizeReceiptItemsBtn')?.addEventListener('click', openPaperReceiptRecognition);
+byId('choosePaperReceiptPhotoBtn')?.addEventListener('click', () => byId('paperReceiptInput')?.click());
+byId('paperReceiptInput')?.addEventListener('change', async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const progress = byId('paperReceiptProgress');
+  if (progress) progress.hidden = false;
+  byId('paperReceiptStatus').textContent = 'Распознаю магазин, дату, итог и товары…';
+  try {
+    if (file.size > 12 * 1024 * 1024) throw new Error('Фото больше 12 МБ. Уменьшите размер изображения.');
+    const data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',').pop());
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    if (window.AndroidReceiptOcr?.recognizeBase64) window.AndroidReceiptOcr.recognizeBase64(data);
+    else throw new Error('Распознавание товаров доступно в Android-приложении.');
+  } catch (error) {
+    if (progress) progress.hidden = true;
+    byId('paperReceiptStatus').textContent = error.message || String(error);
+  } finally {
+    event.target.value = '';
+  }
+});
+
+
+byId("shoppingScanQrBtn")?.addEventListener("click", () => {
+  setReceiptScanStatus("Открываю камеру. Наведите её на QR-код внизу чека.");
+  if (!startNativeReceiptScanner()) {
+    setReceiptScanStatus("Камера QR доступна в Android-приложении после обновления APK.");
+  }
+});
+
+byId("shoppingPhotoReceiptBtn")?.addEventListener("click", () => byId("shoppingReceiptPhotoInput")?.click());
+byId("shoppingChooseReceiptBtn")?.addEventListener("click", () => byId("shoppingReceiptGalleryInput")?.click());
+byId("shoppingPasteQrBtn")?.addEventListener("click", () => openQrPasteDialog("Ручной ввод — запасной способ. Вставьте уже скопированную строку QR."));
+
+async function recognizeShoppingReceiptPhoto(file) {
+  if (!file) return;
+  setReceiptScanStatus("Распознаю магазин, дату, итог и товарные позиции…");
+  try {
+    if (!window.AndroidReceiptOcr?.recognizeBase64) throw new Error("OCR чека доступен в Android-приложении после обновления APK.");
+    const payload = await fileToBase64Payload(file);
+    window.AndroidReceiptOcr.recognizeBase64(payload);
+  } catch (error) {
+    setReceiptScanStatus(error.message || String(error));
+  }
+}
+
+["shoppingReceiptPhotoInput", "shoppingReceiptGalleryInput"].forEach((id) => {
+  byId(id)?.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    await recognizeShoppingReceiptPhoto(file);
+    event.target.value = "";
+  });
+});
 
 
 // ===== Package 4: diagnostics, data integrity and safe recovery =====
