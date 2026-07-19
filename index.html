@@ -741,6 +741,17 @@
 </article>
 </div>
 
+<section class="panel danger-zone-panel" id="databaseDangerZone">
+  <div class="panel-head">
+    <div>
+      <span class="eyebrow">Опасная зона</span>
+      <h2>Удаление базы приложения</h2>
+      <p>Удаляются операции, счета, категории, кредиты, вклады, страховки, имущество, алименты, покупки, семейные профили, резервные снимки и настройки синхронизации на этом устройстве.</p>
+    </div>
+    <button class="danger" id="openDeleteDatabaseBtn" type="button">Удалить базу</button>
+  </div>
+  <p class="backup-note">Перед удалением рекомендуется сохранить полную резервную копию. Отменить удаление после подтверждения будет невозможно.</p>
+</section>
 
 <section class="panel cloud-sync-panel">
   <div class="panel-head">
@@ -1554,6 +1565,39 @@
 })();
 </script>
 
+
+<dialog class="delete-database-dialog" id="deleteDatabaseDialog">
+  <form id="deleteDatabaseForm">
+    <header>
+      <div>
+        <span class="danger-dialog-icon">!</span>
+        <h2>Удалить всю базу?</h2>
+        <p>Это действие полностью очистит данные ФинПорядок на этом устройстве.</p>
+      </div>
+      <button data-close type="button" aria-label="Закрыть">×</button>
+    </header>
+    <div class="delete-warning-list">
+      <strong>Будут удалены:</strong>
+      <span>операции, счета и категории;</span>
+      <span>кредиты, вклады, подписки и страховки;</span>
+      <span>имущество, документы и алименты;</span>
+      <span>семейные профили, локальные снимки и настройки синхронизации.</span>
+    </div>
+    <label class="delete-confirm-field">
+      Для подтверждения введите <strong>УДАЛИТЬ</strong>
+      <input id="deleteDatabaseConfirmInput" name="confirmation" autocomplete="off" spellcheck="false" placeholder="УДАЛИТЬ">
+    </label>
+    <label class="delete-confirm-checkbox">
+      <input id="deleteDatabaseAcknowledge" type="checkbox">
+      <span>Я понимаю, что данные нельзя будет восстановить без ранее сохранённой резервной копии.</span>
+    </label>
+    <p class="form-status" id="deleteDatabaseStatus" aria-live="polite"></p>
+    <menu>
+      <button data-close type="button">Отмена</button>
+      <button class="danger" id="confirmDeleteDatabaseBtn" type="submit" disabled>Удалить безвозвратно</button>
+    </menu>
+  </form>
+</dialog>
 
 <div class="mobile-nav-backdrop" id="mobileNavBackdrop" hidden></div>
 <aside class="mobile-nav-drawer" id="mobileNavDrawer" aria-hidden="true">
