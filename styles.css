@@ -2080,3 +2080,174 @@ dialog::backdrop {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Package 14.1: larger mobile footer and section drawer icons */
+@media (max-width: 900px) {
+  .mobile-bottom-nav {
+    padding: 10px 10px 8px !important;
+    border-radius: 28px !important;
+  }
+
+  .mobile-bottom-nav button {
+    gap: 5px !important;
+    padding: 6px 2px 4px !important;
+  }
+
+  .mobile-bottom-nav button img {
+    width: 40px !important;
+    height: 40px !important;
+  }
+
+  .mobile-bottom-nav button span {
+    font-size: 12px !important;
+    font-weight: 700;
+    line-height: 1.05;
+  }
+
+  .mobile-bottom-nav .mobile-add-operation {
+    transform: translateY(-17px) !important;
+    gap: 4px !important;
+  }
+
+  .mobile-bottom-nav .mobile-add-operation > span {
+    width: 68px !important;
+    height: 68px !important;
+    font-size: 50px !important;
+    line-height: 62px !important;
+  }
+
+  .mobile-bottom-nav .mobile-add-operation small {
+    font-size: 11px !important;
+    font-weight: 700;
+  }
+
+  .mobile-nav-drawer {
+    padding: 18px !important;
+  }
+
+  .mobile-drawer-grid {
+    gap: 12px !important;
+  }
+
+  .mobile-drawer-grid button {
+    min-height: 108px !important;
+    padding: 12px 8px !important;
+    gap: 10px !important;
+    border-radius: 20px !important;
+  }
+
+  .mobile-drawer-grid img {
+    width: 42px !important;
+    height: 42px !important;
+  }
+
+  .mobile-drawer-grid span {
+    font-size: 12px !important;
+    font-weight: 700;
+    line-height: 1.15 !important;
+  }
+}
+
+@media (max-width: 560px) {
+  .mobile-bottom-nav {
+    left: 8px !important;
+    right: 8px !important;
+  }
+
+  .mobile-bottom-nav button img {
+    width: 38px !important;
+    height: 38px !important;
+  }
+
+  .mobile-bottom-nav button span {
+    font-size: 11px !important;
+  }
+
+  .mobile-drawer-grid button {
+    min-height: 102px !important;
+    padding: 12px 6px !important;
+  }
+
+  .mobile-drawer-grid img {
+    width: 40px !important;
+    height: 40px !important;
+  }
+}
+
+
+/* Package 14.2 — protected database deletion */
+.danger-zone-panel {
+  margin-top: 16px;
+  border-color: rgba(211, 70, 86, .28) !important;
+  background: linear-gradient(135deg, rgba(255,255,255,.98), rgba(255,245,246,.96)) !important;
+}
+body[data-ui-theme="dark"] .danger-zone-panel {
+  background: linear-gradient(135deg, #172333, #291b24) !important;
+}
+.danger-zone-panel .eyebrow { color: #c73549; }
+.danger-zone-panel .panel-head { align-items: center; }
+button.danger, .danger {
+  background: linear-gradient(145deg, #e45a6b, #c83046) !important;
+  border-color: transparent !important;
+  color: #fff !important;
+  box-shadow: 0 10px 22px rgba(200, 48, 70, .22);
+}
+button.danger:disabled {
+  opacity: .42;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.delete-database-dialog {
+  width: min(540px, calc(100vw - 24px));
+}
+.delete-database-dialog header > div { position: relative; padding-left: 58px; }
+.danger-dialog-icon {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #ffe2e6;
+  color: #c83046;
+  font-size: 28px;
+  font-weight: 900;
+}
+.delete-warning-list {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid rgba(211, 70, 86, .24);
+  border-radius: 18px;
+  background: rgba(255, 239, 242, .72);
+}
+body[data-ui-theme="dark"] .delete-warning-list { background: rgba(86, 31, 45, .32); }
+.delete-warning-list span::before { content: "• "; color: #c83046; font-weight: 900; }
+.delete-confirm-field strong { color: #c83046; }
+.delete-confirm-field input {
+  margin-top: 8px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-weight: 800;
+}
+.delete-confirm-checkbox {
+  display: flex !important;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(245,247,249,.9);
+}
+body[data-ui-theme="dark"] .delete-confirm-checkbox { background: #122031; }
+.delete-confirm-checkbox input { width: 20px; height: 20px; flex: 0 0 auto; }
+.delete-confirm-checkbox span { font-size: 13px; line-height: 1.35; }
+#deleteDatabaseStatus { color: #c83046; min-height: 20px; }
+@media (max-width: 560px) {
+  .danger-zone-panel .panel-head { align-items: stretch; }
+  .danger-zone-panel .panel-head button { width: 100%; }
+  .delete-database-dialog header > div { padding-left: 52px; }
+}
