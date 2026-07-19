@@ -774,6 +774,36 @@
 </section>
 
 
+<section class="panel cloud-sync-panel firebase-sync-panel">
+  <div class="panel-head">
+    <div>
+      <span class="eyebrow">Firebase</span>
+      <h2>Синхронизация через Realtime Database</h2>
+      <p>Используйте проект Firebase для общей семейной базы без выбора облачной папки на каждом телефоне.</p>
+    </div>
+    <strong id="firebaseSyncBadge">Не настроено</strong>
+  </div>
+  <div class="cloud-sync-grid">
+    <article class="cloud-sync-status-card">
+      <span>Проект</span>
+      <strong>family-budget-d951d</strong>
+      <small id="firebaseSyncLastAt">Синхронизация ещё не выполнялась</small>
+    </article>
+    <article class="cloud-sync-status-card">
+      <span>База</span>
+      <strong id="firebaseSyncPath">finporyadok/families/default/state</strong>
+      <small id="firebaseSyncStateText">Добавьте google-services.json и пересоберите APK.</small>
+    </article>
+  </div>
+  <div class="cloud-sync-actions">
+    <button class="primary" id="firebasePushBtn" type="button">Отправить в Firebase</button>
+    <button class="ghost" id="firebasePullBtn" type="button">Получить из Firebase</button>
+  </div>
+  <label class="work-expense-checkbox cloud-auto-toggle"><input id="firebaseAutoSync" type="checkbox"><span><strong>Автоотправка в Firebase</strong><small>После каждого сохранения отправлять свежую базу в Firebase, если APK настроен.</small></span></label>
+  <p class="backup-note" id="firebaseSyncMessage">Firebase пока не подключен к APK. Скачайте google-services.json из консоли Firebase в папку app и пересоберите приложение.</p>
+</section>
+
+
 <section class="panel family-access-panel">
   <div class="panel-head">
     <div><span class="eyebrow">Семейный доступ</span><h2>Профили семьи</h2><p id="currentFamilyAccessSummary">Полный доступ ко всем разделам и данным семьи</p></div>
