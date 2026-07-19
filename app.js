@@ -28,11 +28,7 @@ const state = {
   importRules: Array.isArray(savedState.importRules) ? savedState.importRules : [],
   reconciliationReviewed: savedState.reconciliationReviewed && typeof savedState.reconciliationReviewed === "object" ? savedState.reconciliationReviewed : {},
   assets: Array.isArray(savedState.assets) ? savedState.assets : [],
-  shopping: savedState.shopping.length ? savedState.shopping : [
-    { name: "Молоко", qty: "2 л", days: 4, price: 92 },
-    { name: "Корм", qty: "3 кг", days: 26, price: 1450 },
-    { name: "Стиральный порошок", qty: "1 уп.", days: 32, price: 620 }
-  ]
+  shopping: Array.isArray(savedState.shopping) ? savedState.shopping : []
 };
 normalizeActiveFamilyMember();
 ensureRowIds();
@@ -156,7 +152,7 @@ function loadState() {
     const raw = JSON.parse(localStorage.getItem(storeKey) || "null");
     const saved = migrateStoredState(raw);
     return {
-      rows: saved?.rows?.length ? saved.rows : seedRows,
+      rows: Array.isArray(saved?.rows) ? saved.rows : seedRows,
       accounts: Array.isArray(saved?.accounts) ? saved.accounts : [],
       categories: Array.isArray(saved?.categories) ? saved.categories : [],
       importArchive: Array.isArray(saved?.importArchive) ? saved.importArchive : [],
@@ -4503,6 +4499,93 @@ function applyBackup(mode) {
 byId("backupJsonBtn")?.addEventListener("click", exportData);
 byId("exportCsvBtn")?.addEventListener("click", exportTransactionsCsv);
 byId("restoreBackupBtn")?.addEventListener("click", () => byId("backupRestoreInput")?.click());
+
+function blankDatabaseState() {
+  return {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    savedAt: new Date().toISOString(),
+    rows: [],
+    accounts: [],
+    categories: [],
+    importArchive: [],
+    shopping: [],
+    shoppingAliases: {},
+    financialProducts: [],
+    insurancePolicies: [],
+    alimonyRules: [],
+    regularPayments: [],
+    plannedPaymentStates: {},
+    officialSubsistenceData: null,
+    officialSubsistenceByYear: {},
+    familyMembers: [],
+    activeMemberId: "family-tatiana",
+    familyActivityLog: [],
+    budgetPlans: [],
+    savingsGoals: [],
+    forecastSettings: { reserve: 0, horizonDays: 30 },
+    importRules: [],
+    reconciliationReviewed: {},
+    assets: []
+  };
+}
+
+function updateDeleteDatabaseButtonState() {
+  const phrase = byId("deleteDatabaseConfirmInput")?.value?.trim() || "";
+  const acknowledged = Boolean(byId("deleteDatabaseAcknowledge")?.checked);
+  const button = byId("confirmDeleteDatabaseBtn");
+  if (button) button.disabled = phrase !== "УДАЛИТЬ" || !acknowledged;
+}
+
+function openDeleteDatabaseDialog() {
+  const dialog = byId("deleteDatabaseDialog");
+  const form = byId("deleteDatabaseForm");
+  if (!dialog || !form) return;
+  form.reset();
+  const status = byId("deleteDatabaseStatus");
+  if (status) status.textContent = "";
+  updateDeleteDatabaseButtonState();
+  if (typeof dialog.showModal === "function") dialog.showModal();
+  else dialog.setAttribute("open", "");
+  setTimeout(() => byId("deleteDatabaseConfirmInput")?.focus(), 100);
+}
+
+function deleteLocalDatabasePermanently() {
+  try {
+    suppressCloudAutoSync = true;
+  } catch {}
+  try {
+    window.AndroidCloudSync?.disconnectCloudFolder?.();
+  } catch {}
+
+  const keysToRemove = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key && key.startsWith(storeKey)) keysToRemove.push(key);
+  }
+  keysToRemove.forEach((key) => localStorage.removeItem(key));
+  localStorage.setItem(storeKey, JSON.stringify(blankDatabaseState()));
+  sessionStorage.clear();
+}
+
+byId("openDeleteDatabaseBtn")?.addEventListener("click", openDeleteDatabaseDialog);
+byId("deleteDatabaseConfirmInput")?.addEventListener("input", updateDeleteDatabaseButtonState);
+byId("deleteDatabaseAcknowledge")?.addEventListener("change", updateDeleteDatabaseButtonState);
+byId("deleteDatabaseForm")?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const phrase = byId("deleteDatabaseConfirmInput")?.value?.trim() || "";
+  const acknowledged = Boolean(byId("deleteDatabaseAcknowledge")?.checked);
+  if (phrase !== "УДАЛИТЬ" || !acknowledged) {
+    const status = byId("deleteDatabaseStatus");
+    if (status) status.textContent = "Введите слово УДАЛИТЬ и подтвердите предупреждение.";
+    return;
+  }
+  const finalConfirmation = window.confirm("Последнее подтверждение: удалить всю локальную базу ФинПорядок без возможности отмены?");
+  if (!finalConfirmation) return;
+  deleteLocalDatabasePermanently();
+  const status = byId("deleteDatabaseStatus");
+  if (status) status.textContent = "База удалена. Приложение перезапускается…";
+  setTimeout(() => location.reload(), 350);
+});
 
 byId("backupRestoreInput")?.addEventListener("change", async (event) => {
   const file = event.target.files?.[0];
