@@ -11,7 +11,7 @@ android {
     compileSdk 35
 
     def ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")
-    def appVersionCode = ciRunNumber ? 1000 + ciRunNumber.toInteger() : 60
+    def appVersionCode = ciRunNumber ? 1000 + ciRunNumber.toInteger() : 62
     def releaseKeyFile = file("finporyadok-update-key.jks")
     def releaseKeyBase64File = file("finporyadok-update-key.jks.base64")
     if (!releaseKeyFile.exists() && releaseKeyBase64File.exists()) {
@@ -23,7 +23,7 @@ android {
         minSdk 23
         targetSdk 35
         versionCode appVersionCode
-        versionName "0.20.5"
+        versionName "0.20.7"
     }
 
     signingConfigs {
@@ -55,6 +55,7 @@ dependencies {
     implementation "com.google.firebase:firebase-database"
     implementation "com.google.android.gms:play-services-code-scanner:16.1.0"
     implementation "com.google.mlkit:text-recognition:16.0.1"
+    implementation "com.google.mlkit:barcode-scanning:17.3.0"
 }
 
 tasks.register("syncWebAssets", Copy) {
