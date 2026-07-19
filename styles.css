@@ -2251,3 +2251,26 @@ body[data-ui-theme="dark"] .delete-confirm-checkbox { background: #122031; }
   .danger-zone-panel .panel-head button { width: 100%; }
   .delete-database-dialog header > div { padding-left: 52px; }
 }
+
+/* Package 14.3 — receipt OCR down to product level */
+.receipt-items-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.paper-receipt-dialog{max-width:520px}
+.paper-receipt-guide{display:grid;gap:6px;padding:15px 16px;margin:4px 0 14px;border:1px solid var(--ui-line,#dfe8ee);border-radius:18px;background:rgba(8,167,170,.07)}
+.paper-receipt-guide span{color:var(--ui-muted,#6f8199);line-height:1.45}
+.paper-receipt-progress{display:flex;align-items:center;gap:14px;padding:15px 16px;border-radius:18px;background:rgba(255,255,255,.7);border:1px solid var(--ui-line,#dfe8ee)}
+.paper-receipt-progress strong,.paper-receipt-progress small{display:block}.paper-receipt-progress small{margin-top:3px;color:var(--ui-muted,#6f8199)}
+.paper-receipt-spinner{width:34px;height:34px;border-radius:50%;border:4px solid rgba(8,167,170,.18);border-top-color:var(--ui-accent,#08a7aa);animation:receipt-spin .8s linear infinite;flex:0 0 34px}
+@keyframes receipt-spin{to{transform:rotate(360deg)}}
+@media(max-width:560px){.receipt-items-section .panel-head{align-items:flex-start;gap:12px}.receipt-items-actions{width:100%;justify-content:stretch}.receipt-items-actions button{flex:1;min-height:44px}.receipt-item{grid-template-columns:minmax(0,1fr) 70px 70px!important}.receipt-item-price{grid-column:1/3}.receipt-item-card{grid-column:1/3}}
+
+
+/* Package 14.4 — real receipt scanning in Shopping */
+.shopping-receipt-actions{margin-bottom:16px}
+.receipt-action-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.receipt-action-button{min-height:132px;padding:16px;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:6px;text-align:left;border-radius:22px;background:#fff;border:1px solid var(--ui-line);color:var(--ui-text)}
+.receipt-action-button.primary{color:#fff;background:linear-gradient(145deg,#16bfc0,#008e98);border-color:transparent}
+.receipt-action-icon{display:grid;place-items:center;width:46px;height:46px;border-radius:15px;background:rgba(8,167,170,.12);font-size:29px;line-height:1}
+.receipt-action-button.primary .receipt-action-icon{background:rgba(255,255,255,.18)}
+.receipt-action-button strong{font-size:16px}.receipt-action-button small{color:var(--ui-muted);line-height:1.3}.receipt-action-button.primary small{color:rgba(255,255,255,.82)}
+.shopping-receipt-status{margin-top:12px}.receipt-manual-details{margin-top:10px}.receipt-manual-details summary{cursor:pointer;color:var(--ui-muted);font-size:13px}.receipt-manual-details button{margin-top:8px}
+@media(max-width:700px){.receipt-action-grid{grid-template-columns:1fr 1fr}.receipt-action-button{min-height:116px;padding:14px}.receipt-action-grid .receipt-action-button:first-child{grid-column:1/-1;min-height:96px}.receipt-action-icon{width:42px;height:42px;font-size:26px}}
