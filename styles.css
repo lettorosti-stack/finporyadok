@@ -1960,13 +1960,18 @@ button.primary {
 }
 
 .mobile-bottom-nav button img {
-  width: 27px;
-  height: 27px;
+  width: 34px;
+  height: 34px;
 }
 
-.mobile-add-operation > span {
+.mobile-bottom-nav .mobile-add-operation > span {
+  width: 64px;
+  height: 64px;
   background: linear-gradient(145deg, #16bfc0, #008e98);
   box-shadow: 0 12px 28px rgba(0, 142, 152, .36);
+  font-size: 48px;
+  line-height: 58px;
+  font-weight: 300;
 }
 
 dialog {
