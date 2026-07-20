@@ -11,7 +11,7 @@ android {
     compileSdk 35
 
     def ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")
-    def appVersionCode = ciRunNumber ? 1000 + ciRunNumber.toInteger() : 63
+    def appVersionCode = ciRunNumber ? 1000 + ciRunNumber.toInteger() : 62
     def releaseKeyFile = file("finporyadok-update-key.jks")
     def releaseKeyBase64File = file("finporyadok-update-key.jks.base64")
     if (!releaseKeyFile.exists() && releaseKeyBase64File.exists()) {
@@ -23,7 +23,7 @@ android {
         minSdk 23
         targetSdk 35
         versionCode appVersionCode
-        versionName "0.20.8"
+        versionName "0.20.9"
     }
 
     signingConfigs {
