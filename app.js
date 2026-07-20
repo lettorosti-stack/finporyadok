@@ -1049,30 +1049,43 @@ function arrangeDashboardPanels() {
   const latest = byId("dashboardLatestPanel");
   const payments = byId("utilityAlertsPanel");
   const notifications = byId("nativeNotificationPanel");
-  [accounts, payments, notifications, categories, latest].filter(Boolean).forEach((node) => layout.appendChild(node));
+  const quickAccess = dashboard.querySelector(".dashboard-quick-access");
+  [accounts, payments, notifications, categories, latest, quickAccess].filter(Boolean).forEach((node) => layout.appendChild(node));
   if (!grid.children.length) grid.remove();
 }
 
 const sectionIconAssets = {
+  dashboard: "./assets/ui-icons/home.png",
+  transactions: "./assets/ui-icons/transactions.png",
   reimbursements: "./assets/ui-icons/reimbursements.svg",
+  accounts: "./assets/ui-icons/accounts.png",
+  budgets: "./assets/ui-icons/categories.png",
+  reports: "./assets/ui-icons/reports.png",
+  shopping: "./assets/ui-icons/shopping.png",
+  alimony: "./assets/ui-icons/alimony.png",
+  import: "./assets/ui-icons/import.png",
   calendar: "./assets/ui-icons/calendar-payments.svg",
   "finance-products": "./assets/ui-icons/finance-products.svg",
   insurance: "./assets/ui-icons/insurance.svg",
   planning: "./assets/ui-icons/planning.svg",
-  assets: "./assets/ui-icons/assets.svg"
+  assets: "./assets/ui-icons/assets.svg",
+  settings: "./assets/ui-icons/settings.png"
 };
 
 function enhanceSectionIcons() {
   document.querySelectorAll(".sidebar .nav button[data-view]").forEach((button) => {
     const src = sectionIconAssets[button.dataset.view];
     if (!src) return;
-    const img = button.querySelector("img");
-    if (img) {
-      img.src = src;
-      img.removeAttribute("srcset");
-    } else {
-      button.insertAdjacentHTML("afterbegin", `<img class="nav-icon" src="${src}" alt="">`);
+    button.querySelectorAll(".nav-icon-emoji, .nav-emoji").forEach((node) => node.remove());
+    let img = button.querySelector("img.nav-icon");
+    if (!img) {
+      img = document.createElement("img");
+      img.className = "nav-icon";
+      img.alt = "";
+      button.insertBefore(img, button.firstChild);
     }
+    img.src = src;
+    img.removeAttribute("srcset");
   });
 }
 
@@ -5183,14 +5196,8 @@ byId('shoppingCatalog')?.addEventListener('click',e=>{const c=e.target.closest('
 byId('purchasePredictions')?.addEventListener('click',e=>{const c=e.target.closest('[data-product-key]');if(c)openProductDetails(c.dataset.productKey);});
 byId('productDetailsBody')?.addEventListener('click',e=>{const b=e.target.closest('.add-product-to-list');if(!b)return;const p=productCatalog().find(x=>x.key===b.dataset.productKey);if(!p)return;state.shopping.unshift({id:`shopping-plan-${Date.now()}`,recordType:'planned',name:p.name,canonicalName:p.name,qty:p.last.qty||'1 шт.',store:p.storeStats[0]?.store||p.last.store||'',price:Number(p.last.price)||0,date:p.nextDate,checked:false});saveState();byId('productDetailsDialog').close();renderShopping();});
 function receiptNumber(value) {
-  const normalized = String(value || '')
-    .replace(/[\s\u00a0]/g, '')
-    .replace(/,/g, '.')
-    .replace(/[ОOо]/g, '0')
-    .replace(/[^0-9.\-]/g, '');
-  const parts = normalized.split('.');
-  const compact = parts.length > 2 ? `${parts.slice(0, -1).join('')}.${parts.at(-1)}` : normalized;
-  const number = Number(compact);
+  const normalized = String(value || '').replace(/\s/g, '').replace(',', '.').replace(/[^0-9.\-]/g, '');
+  const number = Number(normalized);
   return Number.isFinite(number) ? number : 0;
 }
 
@@ -5204,50 +5211,17 @@ function receiptUnit(value) {
   return 'шт.';
 }
 
-function normalizeReceiptOcrLine(value) {
-  return String(value || '')
-    .replace(/[\t\u00a0]+/g, ' ')
-    .replace(/[|¦]/g, ' ')
-    .replace(/[—–]/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 function cleanReceiptItemName(value) {
-  return normalizeReceiptOcrLine(value)
-    .replace(/^\s*(?:\d+[.)]|[№#]\s*\d+)\s*/, '')
-    .replace(/^\s*(?:шт|кг|г|гр|л|мл|уп)\.?\s*/i, '')
-    .replace(/^\s*[А-ЯA-Z]{0,3}\d{4,}\s*/i, '')
-    .replace(/\s+(?:x|х|×|\*)\s*\d+[.,]?\d*\s*(?:шт|кг|г|л|мл|уп)?\.?/ig, ' ')
-    .replace(/\s+\d+[.,]\d{2}\s*(?:x|х|×|\*)\s*\d+[.,]?\d*/ig, ' ')
-    .replace(/(?:=|:)\s*\d{1,8}[.,]\d{2}\s*$/i, '')
-    .replace(/\s+\d{1,8}[.,]\d{2}\s*$/i, '')
-    .replace(/^[^А-ЯA-ZЁа-яё]+/g, '')
-    .replace(/[^А-ЯA-ZЁа-яё0-9%+().,\-\s]+$/g, '')
+  return String(value || '')
+    .replace(/^\s*\d+[.)]\s*/, '')
+    .replace(/\s+(?:x|х|×)\s*\d+[.,]?\d*\s*(?:шт|кг|г|л|мл|уп)?\.?$/i, '')
     .replace(/\s{2,}/g, ' ')
+    .replace(/[|_*]+$/g, '')
     .trim();
 }
 
 function isReceiptServiceLine(value) {
-  const text = normalizeReceiptOcrLine(value);
-  return /(?:^|\b)(?:итог|итого|всего|к оплате|сумма|наличными|безналичными|банковск|терминал|мерчант|карта|mir|visa|сдача|скидка|ндс|налог|кассир|касса|чек|фн|фд|фп|инн|ккт|рн ккт|зн ккт|смена|приход|возврат|оплата|одобрено|rrn|комиссия|адрес|сайт|спасибо|телефон|эквайринг|проверено|операци|место расчет|nalog|оператор фискальных)/i.test(text);
-}
-
-function isReceiptCodeLine(value) {
-  const text = normalizeReceiptOcrLine(value).replace(/\s/g, '');
-  if (!text) return true;
-  if (/^(?:\d{6,}|[A-F0-9]{12,})$/i.test(text)) return true;
-  if (text.length >= 16 && !/[А-ЯЁа-яё]{3,}/.test(text) && /\d/.test(text)) return true;
-  return false;
-}
-
-function isLikelyReceiptItemName(value) {
-  const name = cleanReceiptItemName(value);
-  if (name.length < 3 || name.length > 140) return false;
-  if (isReceiptServiceLine(name) || isReceiptCodeLine(name)) return false;
-  if (!/[А-ЯЁа-яёA-Za-z]{2,}/.test(name)) return false;
-  if (/^(?:ооо|ип|магазин|торгсервис|светофор)$/i.test(name)) return false;
-  return true;
+  return /^(?:итог|итого|всего|сумма|наличными|безналичными|карта|сдача|скидка|ндс|налог|кассир|чек|фн|фд|фп|инн|ккт|смена|приход|оплата|адрес|сайт|спасибо|телефон|эквайринг|банковская карта)/i.test(String(value || '').trim());
 }
 
 function parseReceiptDateTime(text) {
@@ -5264,130 +5238,83 @@ function parseReceiptDateTime(text) {
 }
 
 function parseReceiptTotal(text) {
-  const lines = String(text || '').split(/\r?\n/).map(normalizeReceiptOcrLine).filter(Boolean);
+  const lines = String(text || '').split(/\r?\n/).map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
   const candidates = [];
   lines.forEach((line, index) => {
-    const amountMatches = [...line.matchAll(/(\d{1,8}[.,]\d{2})\s*(?:₽|руб(?:\.|ля|лей)?)?/gi)];
+    const amountMatches = [...line.matchAll(/(\d{1,7}[.,]\d{2})\s*(?:₽|руб(?:\.|ля|лей)?)?/gi)];
     amountMatches.forEach((match) => {
       const value = receiptNumber(match[1]);
       if (!value) return;
-      const strong = /итог|итого|к оплате|сумма чека/i.test(line);
-      candidates.push({ value, weight: strong ? 10000 + index : index });
+      const weight = /итог|итого|всего|к оплате|сумма чека/i.test(line) ? 1000 : index;
+      candidates.push({ value, weight });
     });
   });
   candidates.sort((a, b) => b.weight - a.weight || b.value - a.value);
   return candidates[0]?.value || 0;
 }
 
-function receiptItemRegion(lines) {
-  let start = lines.findIndex((line) => /кассовый чек|чек\s*\(?приход|приход\)?/i.test(line));
-  if (start < 0) start = lines.findIndex((line) => /кассир|касса/i.test(line));
-  start = start < 0 ? 0 : start + 1;
-  let end = lines.findIndex((line, index) => index > start && /банковск(?:ие|ая)?\s+(?:оплат|платеж)|терминал|итог(?:о)?\s*(?:к оплате)?/i.test(line));
-  if (end < 0) end = lines.length;
-  return lines.slice(start, end);
-}
+function parseReceiptTextDetailed(text) {
+  const lines = String(text || '').split(/\r?\n/).map((line) => line.replace(/[\t\u00a0]+/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const items = [];
+  const priceAtEnd = /(\d{1,7}[.,]\d{2})\s*(?:₽|руб(?:\.|ля|лей)?)?\s*$/i;
+  const qtyPattern = /(?:^|\s)(\d+[.,]?\d*)\s*(?:x|х|×)\s*(\d+[.,]\d{2})(?:\s|$)/i;
+  const standaloneQty = /(?:^|\s)(\d+[.,]?\d*)\s*(шт\.?|кг|г|гр\.?|л|мл|уп\.?|упак\.)\b/i;
 
-function receiptLineAmounts(line) {
-  return [...normalizeReceiptOcrLine(line).matchAll(/\d{1,8}[.,]\d{2}/g)]
-    .map((match) => ({ raw: match[0], index: match.index, value: receiptNumber(match[0]) }))
-    .filter((x) => x.value > 0);
-}
+  for (let i = 0; i < lines.length; i += 1) {
+    let line = lines[i];
+    if (isReceiptServiceLine(line)) continue;
+    const priceMatch = line.match(priceAtEnd);
+    let name = '';
+    let total = 0;
+    let qty = 1;
+    let unit = 'шт.';
 
-function parseReceiptItemCandidate(sourceLine, previousName = '') {
-  const line = normalizeReceiptOcrLine(sourceLine);
-  if (!line || isReceiptServiceLine(line) || isReceiptCodeLine(line)) return null;
-  const amounts = receiptLineAmounts(line);
-  if (!amounts.length) return null;
-  const totalAmount = amounts.at(-1);
-  let qty = 1;
-  let unit = receiptUnit(line);
-  const multiplier = line.match(/(?:x|х|×|\*)\s*(\d+[.,]?\d*)/i) || line.match(/(\d+[.,]?\d*)\s*(?:x|х|×|\*)/i);
-  if (multiplier) qty = Math.max(0.001, receiptNumber(multiplier[1]) || 1);
-  const qtyUnit = line.match(/(?:^|\s)(\d+[.,]?\d*)\s*(шт\.?|кг|гр?\.?|г|л|мл|уп\.?|упак\.?)\b/i);
-  if (qtyUnit) {
-    qty = Math.max(0.001, receiptNumber(qtyUnit[1]) || qty);
-    unit = receiptUnit(qtyUnit[2]);
-  }
-  let namePart = line.slice(0, totalAmount.index);
-  const equalsIndex = namePart.lastIndexOf('=');
-  if (equalsIndex >= 0) namePart = namePart.slice(0, equalsIndex);
-  namePart = namePart.replace(/\d{1,8}[.,]\d{2}\s*(?:x|х|×|\*)\s*\d+[.,]?\d*/ig, ' ');
-  let name = cleanReceiptItemName(namePart);
-  if (!isLikelyReceiptItemName(name) && previousName) name = cleanReceiptItemName(previousName);
-  if (!isLikelyReceiptItemName(name)) return null;
-  return { name, price: totalAmount.value, qty, unit, confidence: amounts.length > 1 || /=/.test(line) ? 0.94 : 0.78 };
-}
-
-function parseReceiptItemsFromLines(inputLines) {
-  const allLines = inputLines.map(normalizeReceiptOcrLine).filter(Boolean);
-  const passes = [receiptItemRegion(allLines), allLines];
-  let best = [];
-  for (const lines of passes) {
-    const items = [];
-    let pendingName = '';
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i];
-      if (!receiptLineAmounts(line).length) {
-        if (isLikelyReceiptItemName(line)) pendingName = pendingName ? `${pendingName} ${line}` : line;
-        continue;
-      }
-      const item = parseReceiptItemCandidate(line, pendingName);
-      if (item) {
-        items.push(item);
-        pendingName = '';
-      } else if (i > 0) {
-        const mergedItem = parseReceiptItemCandidate(`${lines[i - 1]} ${line}`, pendingName);
-        if (mergedItem) {
-          items.push(mergedItem);
-          pendingName = '';
-        }
+    if (priceMatch) {
+      total = receiptNumber(priceMatch[1]);
+      name = cleanReceiptItemName(line.slice(0, priceMatch.index));
+    } else if (i + 1 < lines.length && !isReceiptServiceLine(line)) {
+      const nextPrice = lines[i + 1].match(/^\s*(\d{1,7}[.,]\d{2})\s*(?:₽|руб(?:\.|ля|лей)?)?\s*$/i);
+      if (nextPrice) {
+        total = receiptNumber(nextPrice[1]);
+        name = cleanReceiptItemName(line);
+        i += 1;
       }
     }
-    if (items.length > best.length) best = items;
-    if (best.length >= 2) break;
-  }
-  return best.slice(0, 120);
-}
 
-function parseReceiptTextDetailed(payload) {
-  const structured = payload && typeof payload === 'object' ? payload : null;
-  const text = structured ? String(structured.text || '') : String(payload || '');
-  const structuredLines = Array.isArray(structured?.lines)
-    ? structured.lines.slice()
-      .sort((a, b) => Number(a.top || 0) - Number(b.top || 0) || Number(a.left || 0) - Number(b.left || 0))
-      .map((line) => line.text)
-    : [];
-  const rawLines = text.split(/\r?\n/);
-  const lines = structuredLines.length >= 3 ? structuredLines : rawLines;
-  const items = parseReceiptItemsFromLines(lines);
+    if (!name || !total || name.length < 2 || /^\d+$/.test(name)) continue;
+    const qtyMatch = line.match(qtyPattern);
+    if (qtyMatch) qty = Math.max(0.001, receiptNumber(qtyMatch[1]));
+    const simpleQty = line.match(standaloneQty);
+    if (simpleQty) {
+      qty = Math.max(0.001, receiptNumber(simpleQty[1]));
+      unit = receiptUnit(simpleQty[2]);
+    } else {
+      unit = receiptUnit(line);
+    }
+    if (/скидка|бонус|итог|всего|сумма/i.test(name)) continue;
+    items.push({ name, price: total, qty, unit });
+  }
+
+  const deduped = [];
+  items.forEach((item) => {
+    const previous = deduped[deduped.length - 1];
+    if (previous && previous.name === item.name && previous.price === item.price) return;
+    deduped.push(item);
+  });
   const dateTime = parseReceiptDateTime(text);
-  const itemTotal = items.reduce((sum, item) => sum + Number(item.price || 0), 0);
-  const receiptTotal = parseReceiptTotal(text);
   return {
     merchant: parseReceiptMerchant(text),
-    amount: receiptTotal || itemTotal,
+    amount: parseReceiptTotal(text) || deduped.reduce((sum, item) => sum + Number(item.price || 0), 0),
     date: dateTime.date,
     time: dateTime.time,
-    items,
-    itemTotal,
-    rawText: text,
-    sourceLineCount: lines.length
+    items: deduped.slice(0, 120),
+    rawText: String(text || '')
   };
 }
 
 function parseReceiptTextLines(text) {
   return parseReceiptTextDetailed(text).items;
 }
-
-window.onNativeReceiptOcrResult = function(payloadJson) {
-  try {
-    const payload = typeof payloadJson === 'string' ? JSON.parse(payloadJson) : payloadJson;
-    window.onNativeReceiptTextRecognized(payload);
-  } catch (error) {
-    window.onNativeReceiptTextError(`Не удалось обработать результат OCR: ${error.message || error}`);
-  }
-};
 
 window.onNativeReceiptTextRecognized = function(text) {
   const parsed = parseReceiptTextDetailed(text);
