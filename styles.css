@@ -2274,3 +2274,33 @@ body[data-ui-theme="dark"] .delete-confirm-checkbox { background: #122031; }
 .receipt-action-button strong{font-size:16px}.receipt-action-button small{color:var(--ui-muted);line-height:1.3}.receipt-action-button.primary small{color:rgba(255,255,255,.82)}
 .shopping-receipt-status{margin-top:12px}.receipt-manual-details{margin-top:10px}.receipt-manual-details summary{cursor:pointer;color:var(--ui-muted);font-size:13px}.receipt-manual-details button{margin-top:8px}
 @media(max-width:700px){.receipt-action-grid{grid-template-columns:1fr 1fr}.receipt-action-button{min-height:116px;padding:14px}.receipt-action-grid .receipt-action-button:first-child{grid-column:1/-1;min-height:96px}.receipt-action-icon{width:42px;height:42px;font-size:26px}}
+
+/* Package 14.6: unified section icon system and dashboard integrity */
+.quick-access-grid button > img {
+  width: 58px;
+  height: 58px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto 8px;
+  border-radius: 16px;
+  filter: drop-shadow(0 7px 10px rgba(4, 48, 77, .16));
+}
+.quick-access-grid button > span { display: none; }
+.mobile-drawer-grid img,
+.sidebar .nav .nav-icon {
+  object-fit: contain;
+  filter: drop-shadow(0 6px 9px rgba(4, 48, 77, .18));
+}
+.dashboard-approved-layout > .dashboard-quick-access {
+  order: 99;
+  margin-top: 8px;
+}
+@media (max-width: 900px) {
+  .quick-access-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .quick-access-grid button { min-height: 132px; padding: 14px 8px; }
+  .quick-access-grid button > img { width: 54px; height: 54px; }
+}
+@media (max-width: 560px) {
+  .quick-access-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .quick-access-grid button { min-height: 122px; }
+}
