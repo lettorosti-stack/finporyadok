@@ -30,12 +30,6 @@ import android.webkit.JavascriptInterface;
 import android.util.Base64;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
-import android.graphics.ColorMatrix;
-import android.graphics.ColorMatrixColorFilter;
-import android.graphics.Matrix;
-import android.graphics.Paint;
-import android.graphics.Rect;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
@@ -448,77 +442,17 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 try {
                     byte[] bytes = Base64.decode(base64, Base64.DEFAULT);
-                    Bitmap sourceBitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-                    if (sourceBitmap == null) { sendReceiptOcrError("Не удалось открыть изображение чека."); return; }
-                    Bitmap bitmap = prepareReceiptBitmap(sourceBitmap);
-                    if (bitmap != sourceBitmap) sourceBitmap.recycle();
+                    Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                    if (bitmap == null) { sendReceiptOcrError("Не удалось открыть изображение чека."); return; }
                     com.google.mlkit.vision.common.InputImage image = com.google.mlkit.vision.common.InputImage.fromBitmap(bitmap, 0);
                     com.google.mlkit.vision.text.TextRecognizer recognizer = com.google.mlkit.vision.text.TextRecognition.getClient(com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS);
                     recognizer.process(image).addOnSuccessListener(result -> {
-                        try {
-                            JSONObject payload = new JSONObject();
-                            payload.put("text", result.getText());
-                            payload.put("width", bitmap.getWidth());
-                            payload.put("height", bitmap.getHeight());
-                            JSONArray lines = new JSONArray();
-                            for (com.google.mlkit.vision.text.Text.TextBlock block : result.getTextBlocks()) {
-                                for (com.google.mlkit.vision.text.Text.Line line : block.getLines()) {
-                                    JSONObject item = new JSONObject();
-                                    item.put("text", line.getText());
-                                    Rect box = line.getBoundingBox();
-                                    if (box != null) {
-                                        item.put("left", box.left);
-                                        item.put("top", box.top);
-                                        item.put("right", box.right);
-                                        item.put("bottom", box.bottom);
-                                    }
-                                    lines.put(item);
-                                }
-                            }
-                            payload.put("lines", lines);
-                            String js = "window.onNativeReceiptOcrResult(" + payload.toString() + ");";
-                            webView.evaluateJavascript(js, null);
-                        } catch (Exception jsonError) {
-                            sendReceiptOcrError("Текст распознан, но не удалось разобрать строки чека.");
-                        } finally {
-                            recognizer.close();
-                            bitmap.recycle();
-                        }
-                    }).addOnFailureListener(error -> {
-                        recognizer.close();
-                        bitmap.recycle();
-                        sendReceiptOcrError(error.getMessage() == null ? "Не удалось распознать текст чека." : error.getMessage());
-                    });
+                        String js = "window.onNativeReceiptTextRecognized(" + JSONObject.quote(result.getText()) + ");";
+                        webView.evaluateJavascript(js, null);
+                    }).addOnFailureListener(error -> sendReceiptOcrError(error.getMessage() == null ? "Не удалось распознать текст чека." : error.getMessage()));
                 } catch (Exception error) { sendReceiptOcrError(error.getMessage() == null ? "Ошибка распознавания чека." : error.getMessage()); }
             });
         }
-    }
-
-    private Bitmap prepareReceiptBitmap(Bitmap source) {
-        int sourceWidth = source.getWidth();
-        int sourceHeight = source.getHeight();
-        float scale = sourceWidth < 1400 ? Math.min(3.0f, 1600f / Math.max(1, sourceWidth)) : 1f;
-        long targetPixels = (long) (sourceWidth * scale) * (long) (sourceHeight * scale);
-        if (targetPixels > 8000000L) scale = (float) Math.sqrt(8000000d / Math.max(1d, (double) sourceWidth * sourceHeight));
-        int width = Math.max(1, Math.round(sourceWidth * scale));
-        int height = Math.max(1, Math.round(sourceHeight * scale));
-        Bitmap scaled = scale == 1f ? source : Bitmap.createScaledBitmap(source, width, height, true);
-        Bitmap enhanced = Bitmap.createBitmap(scaled.getWidth(), scaled.getHeight(), Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(enhanced);
-        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-        ColorMatrix grayscale = new ColorMatrix();
-        grayscale.setSaturation(0f);
-        ColorMatrix contrast = new ColorMatrix(new float[] {
-                1.55f, 0, 0, 0, -72,
-                0, 1.55f, 0, 0, -72,
-                0, 0, 1.55f, 0, -72,
-                0, 0, 0, 1, 0
-        });
-        grayscale.postConcat(contrast);
-        paint.setColorFilter(new ColorMatrixColorFilter(grayscale));
-        canvas.drawBitmap(scaled, 0, 0, paint);
-        if (scaled != source) scaled.recycle();
-        return enhanced;
     }
 
     private void sendReceiptOcrError(String message) {
